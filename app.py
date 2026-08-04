@@ -79,7 +79,7 @@ def generate_design1_assembly(w_dia, d_dia, lg, hole_count):
         rad = d_dia/2 + 6
         x = rad * np.cos(np.radians(angle))
         y = rad * np.sin(np.radians(angle))
-        assy.add(pin, name=f"Pin_{i}", loc=cq.Location(cq.Vector(x, y, z_bottom)), color=cq.Color("silver"))
+        assy.add(pin, name=f"Pin_{i}", loc=cq.Location(cq.Vector(x, y, z)), color=cq.Color(0.75, 0.75, 0.75))
 
     return assy
 
