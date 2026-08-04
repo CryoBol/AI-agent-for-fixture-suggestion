@@ -215,7 +215,7 @@ if st.button("🚀 Generate High-Fidelity Assembly & Evaluate", width="stretch")
                 assembly = cad_gen_map[d["id"]](waist_dia, disc_dia, length, wire_count)
                 
                 filename = f"fixture_assembly_design_{d['id']}.step"
-                cq.exporters.export(assembly, filename)
+                cq.exporters.export(assembly.toCompound(), filename)
                 
                 with open(filename, "rb") as file:
                     st.download_button(
