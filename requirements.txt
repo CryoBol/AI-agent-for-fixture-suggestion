@@ -1,7 +1,0 @@
-streamlit
-cadquery
-plotly
-numpy
-pandas
-scipy
-torch
