@@ -8,7 +8,7 @@ import cadquery as cq
 st.set_page_config(page_title="PDA Occluder Heat-Setting Fixture Suite", layout="wide")
 
 st.title("🔬 PDA Occluder Heat-Setting Fixture & Dual-Layer Mechanics Studio")
-st.markdown("Integrated computational platform conforming to Drawing No. **PDHIF-01-ASSY** (Design 1: Original Standard Modular Fixture). Combines Nitinol braid mechanics, optimization, and modular CAD fixture generation.")
+st.markdown("Integrated computational platform conforming to Drawing No. **PDHIF-01-ASSY** (Design 1: Original Standard Modular Fixture). Combines Nitinol braid mechanics, optimization, and robust parametric CAD fixture generation.")
 
 # Multi-Tab Layout
 tab1, tab2 = st.tabs(["1. Dual-Layer Mechanics & Optimization Engine", "2. Modular Heat-Setting Fixture CAD & Thermal Studio"])
@@ -22,16 +22,16 @@ with tab1:
     col_t1, col_t2 = st.columns(2)
     with col_t1:
         st.subheader("Macro Geometry & Inner Core")
-        D_macro = st.slider("Waist Diameter ($D_{waist}$ mm)", 4.0, 30.0, 12.0, 0.5, key="t1_D")
+        D_macro = st.slider("Waist Diameter (D_waist mm)", 4.0, 30.0, 12.0, 0.5, key="t1_D")
         P_macro = st.slider("Pitch Length / Pic Length (mm)", 1.0, 10.0, 4.0, 0.2, key="t1_P")
-        N1 = st.slider("Inner Wire Count ($N_1$)", 16, 72, 36, 4, key="t1_N1")
-        d1 = st.slider("Inner Wire Diameter ($d_1$ mm)", 0.10, 0.30, 0.16, 0.01, key="t1_d1")
+        N1 = st.slider("Inner Wire Count (N1)", 16, 72, 36, 4, key="t1_N1")
+        d1 = st.slider("Inner Wire Diameter (d1 mm)", 0.10, 0.30, 0.16, 0.01, key="t1_d1")
 
     with col_t2:
         st.subheader("Outer Shell & Displacement")
-        N2 = st.slider("Outer Wire Count ($N_2$)", 36, 144, 72, 4, key="t1_N2")
-        d2 = st.slider("Outer Wire Diameter ($d_2$ mm)", 0.05, 0.15, 0.09, 0.01, key="t1_d2")
-        delta_r = st.slider("Radial Displacement Simulation ($\Delta r$ mm)", 0.1, 5.0, 1.5, 0.1, key="t1_dr")
+        N2 = st.slider("Outer Wire Count (N2)", 36, 144, 72, 4, key="t1_N2")
+        d2 = st.slider("Outer Wire Diameter (d2 mm)", 0.05, 0.15, 0.09, 0.01, key="t1_d2")
+        delta_r = st.slider("Radial Displacement Simulation (delta_r mm)", 0.1, 5.0, 1.5, 0.1, key="t1_dr")
 
     def calculate_braid_geometry(D_mm, P_mm, N, d):
         tan_theta = (np.pi * D_mm) / P_mm
@@ -100,11 +100,11 @@ with tab1:
                 st.success("Optimization Successfully Converged!")
                 oc1, oc2 = st.columns(2)
                 with oc1:
-                    st.write(f"- **Optimized Inner Wire Count ($N_1$):** {int(round(opt_n1))}")
-                    st.write(f"- **Optimized Inner Diameter ($d_1$):** {opt_d1:.3f} mm")
+                    st.write(f"- **Optimized Inner Wire Count (N1):** {int(round(opt_n1))}")
+                    st.write(f"- **Optimized Inner Diameter (d1):** {opt_d1:.3f} mm")
                 with oc2:
-                    st.write(f"- **Optimized Outer Wire Count ($N_2$):** {int(round(opt_n2))}")
-                    st.write(f"- **Optimized Outer Diameter ($d_2$):** {opt_d2:.3f} mm")
+                    st.write(f"- **Optimized Outer Wire Count (N2):** {int(round(opt_n2))}")
+                    st.write(f"- **Optimized Outer Diameter (d2):** {opt_d2:.3f} mm")
             else:
                 st.warning("Optimization did not converge within specified bounds.")
 
@@ -119,17 +119,17 @@ with tab2:
     cad_c1, cad_c2 = st.columns(2)
     with cad_c1:
         st.subheader("Device & Fixture Parameters")
-        disc_dia = st.slider("Disc Outer Diameter ($D_{disc}$ mm)", 12.0, 30.0, 26.0, step=1.0, key="t2_ddisc")
-        waist_dia = st.slider("Waist Diameter ($D_{waist}$ mm)", 4.0, 12.0, 8.0, step=1.0, key="t2_dwst")
-        h_total = st.slider("Total Fixture Height ($H_{total}$ mm)", 15.0, 30.0, 20.0, step=1.0, key="t2_htot")
-        h_disc = st.slider("Disc Cavity Height ($H_{disc}$ mm)", 4.0, 10.0, 6.0, step=0.5, key="t2_hdisc")
-        h_waist = st.slider("Waist Core Height ($H_{waist}$ mm)", 4.0, 10.0, 6.0, step=0.5, key="t2_hwaist")
+        disc_dia = st.slider("Disc Outer Diameter (D_disc mm)", 12.0, 30.0, 26.0, step=1.0, key="t2_ddisc")
+        waist_dia = st.slider("Waist Diameter (D_waist mm)", 4.0, 12.0, 8.0, step=1.0, key="t2_dwst")
+        h_total = st.slider("Total Fixture Height (H_total mm)", 15.0, 30.0, 20.0, step=1.0, key="t2_htot")
+        h_disc = st.slider("Disc Cavity Height (H_disc mm)", 4.0, 10.0, 6.0, step=0.5, key="t2_hdisc")
+        h_waist = st.slider("Waist Core Height (H_waist mm)", 4.0, 10.0, 6.0, step=0.5, key="t2_hwaist")
 
     with cad_c2:
         st.subheader("Thermal Processing Setup")
         temp = st.number_input("Target Setting Temperature (°C)", 400, 600, 500, key="t2_temp")
         soak_time = st.number_input("Soak Time (mins)", 5, 60, 15, key="t2_soak")
-        st.info("**Materials & Finish (Sec. 8):** Parts 1, 2, 5, 6, 7, 10: 17-4 PH SS (H900, $Ra \\le 0.4$ µm). Part 4: Alumina Ceramic 99.7% ($Ra \\le 0.2$ µm). Part 3: Dowels (6.0 h7).")
+        st.info("**Materials & Finish (Sec. 8):** Parts 1, 2, 5, 6, 7, 10: 17-4 PH SS (H900, Ra <= 0.4 µm). Part 4: Alumina Ceramic 99.7% (Ra <= 0.2 µm). Part 3: Dowels (6.0 h7).")
 
     def generate_modular_pda_fixture(d_disc, d_waist, h_tot, h_d, h_w):
         plate_r = (d_disc / 2.0) + 10.0
@@ -144,7 +144,6 @@ with tab2:
                         .circle(plate_r).extrude(6.0)
                         .faces(">Z").workplane()
                         .circle(plate_r - 2.0).extrude(2.0))
-        # Add M6 bolt holes (4 nos) and vent holes (Part 9, 2.0 mm)
         for i in range(4):
             ang = np.radians(i * 90)
             bx, by = bolt_circle_r * np.cos(ang), bolt_circle_r * np.sin(ang)
@@ -162,25 +161,18 @@ with tab2:
                      .faces(">Z").workplane().circle(disc_r - 1.0).cutThruAll())
         assy.add(comp_stop, name="CompressionStop", loc=cq.Location(cq.Vector(0, 0, 8.0)), color=cq.Color(0.7, 0.7, 0.75))
 
-        # 3. Bottom Cavity Insert / Disc Former (Part 5) - 17-4 PH Stainless Steel
+        # 3. Bottom Cavity Insert / Disc Former (Part 5) - Robust profile avoiding GC_MakeArcOfCircle errors
         bot_insert = (cq.Workplane("XZ")
                       .moveTo(bore_r + 0.05, 0)
                       .lineTo(disc_r + 0.1, 0)
                       .lineTo(disc_r + 0.1, h_d)
-                      .threePointArc((disc_r - 2.0, h_d - 1.5), (bore_r + 0.05, h_d))
-                      .close().revolve(360, (0, 0, 0), (0, 0, 1)))
+                      .lineTo(bore_r + 0.05, h_d)
+                      .close()
+                      .revolve(360, (0, 0, 0), (0, 0, 1))
+                      .edges("|Y").fillet(min(0.8, h_d * 0.25)))
         assy.add(bot_insert, name="BottomCavityInsert", loc=cq.Location(cq.Vector(0, 0, 9.0)), color=cq.Color(0.85, 0.85, 0.9))
 
         # 4. Ceramic Waist Core (Part 4) - Alumina Ceramic 99.7%
-        ceramic_core = (cq.Workplane("XZ")
-                        .moveTo(bore_r, 0)
-                        .lineTo(bore_r + 1.5, 0)
-                        .threePointArc((bore_r + 2.0, 1.5), (bore_r + 1.5, h_w - 1.5))
-                        .threePointArc((bore_r, h_w), (bore_r, h_w))
-                        .lineTo(bore_r, h_w)
-                        .lineTo(bore_r, 0)
-                        .close().revolve(360, (0, 0, 0), (0, 0, 1)))
-        # Simple cylindrical representation with fillets for robust solid generation
         ceramic_core_solid = (cq.Workplane("XY").circle(bore_r + 1.2).extrude(h_w)
                               .faces(">Z").chamfer(0.5)
                               .faces("<Z").chamfer(0.5)
@@ -192,14 +184,15 @@ with tab2:
                       .moveTo(bore_r + 0.05, 0)
                       .lineTo(disc_r + 0.1, 0)
                       .lineTo(disc_r + 0.1, h_d)
-                      .threePointArc((disc_r - 2.0, h_d - 1.5), (bore_r + 0.05, h_d))
-                      .close().revolve(360, (0, 0, 0), (0, 0, 1)))
+                      .lineTo(bore_r + 0.05, h_d)
+                      .close()
+                      .revolve(360, (0, 0, 0), (0, 0, 1))
+                      .edges("|Y").fillet(min(0.8, h_d * 0.25)))
         assy.add(top_insert, name="TopCavityInsert", loc=cq.Location(cq.Vector(0, 0, 9.0 + h_d + h_w)), color=cq.Color(0.85, 0.85, 0.9))
 
         # 6. Top Clamping Plate (Part 1) - 17-4 PH Stainless Steel
         top_plate = (cq.Workplane("XY")
                      .circle(plate_r).extrude(6.0))
-        # Add M6 bolt holes and vent holes matrix
         for i in range(4):
             ang = np.radians(i * 90)
             bx, by = bolt_circle_r * np.cos(ang), bolt_circle_r * np.sin(ang)
@@ -208,7 +201,6 @@ with tab2:
             ang = np.radians(i * 30)
             vx, vy = (disc_r - 6) * np.cos(ang), (disc_r - 6) * np.sin(ang)
             top_plate = top_plate.faces(">Z").workplane().transformed(offset=cq.Vector(vx, vy, 0)).circle(1.0).cutThruAll()
-        # Center opening for mesh loading
         top_plate = top_plate.faces(">Z").workplane().circle(disc_r - 2.0).cutThruAll()
 
         top_plate_z = 9.0 + h_d + h_w + h_d
