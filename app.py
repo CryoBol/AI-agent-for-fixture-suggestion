@@ -114,7 +114,7 @@ with tab1:
 # ==============================================================================
 with tab2:
     st.header("Modular Heat-Setting Fixture Studio (Drawing No. PDHIF-01-ASSY)")
-    st.markdown("Precision parametric CAD generation mapped precisely to the engineering schematics. Employs advanced global boolean tools to guarantee topologically robust 3D models without BRep exceptions.")
+    st.markdown("Precision parametric CAD generation mapped precisely to the engineering schematics. Features robust `pushPoints()` and strict `.close()` wire topology closures to prevent geometry engine failure.")
 
     cad_c1, cad_c2 = st.columns(2)
     with cad_c1:
@@ -156,80 +156,74 @@ with tab2:
         p10 = p10.faces(">Z").workplane().circle(disc_r + 2.0).cutThruAll()
 
         # Part 5: Bottom Cavity Insert (Revolved Funnel)
+        # Using explicit .close() cleanly resolves the internal cavity taper
         pts5 = [
             (bore_r, h_d),                     
-            (bore_r + 2.0, h_d),               
+            (bore_r + 3.0, h_d),               
             (disc_r + 2.0, 2.0),               
             (fixture_r, 2.0),                  
             (fixture_r, 0),                    
-            (disc_r, 0),                       
-            (bore_r, h_d)                      
+            (disc_r, 0)                      
         ]
-        p5 = cq.Workplane("XZ").polyline(pts5).revolve(360, (0,0,0), (0,0,1))
+        p5 = cq.Workplane("XZ").polyline(pts5).close().revolve()
 
-        # Part 4: Ceramic Waist Core (Hourglass)
+        # Part 4: Ceramic Waist Core (Hourglass Approximation)
         d_top = bore_r + 2.0
         pts4 = [
             (0, 0),
             (d_top, 0),
             (bore_r, h_w/2.0),
             (d_top, h_w),
-            (0, h_w),
-            (0, 0)
+            (0, h_w)
         ]
-        p4 = cq.Workplane("XZ").polyline(pts4).revolve(360, (0,0,0), (0,0,1))
+        p4 = cq.Workplane("XZ").polyline(pts4).close().revolve()
 
         # Part 2: Top Cavity Insert
         pts2 = [
-            (bore_r, 0),                       
-            (bore_r + 2.0, 0),                 
-            (disc_r + 2.0, h_d - 2.0),         
-            (fixture_r, h_d - 2.0),            
-            (fixture_r, h_d),                  
-            (disc_r, h_d),                     
+            (disc_r, h_d),                       
+            (fixture_r, h_d),                 
+            (fixture_r, h_d - 2.0),         
+            (disc_r + 2.0, h_d - 2.0),            
+            (bore_r + 3.0, 0),                  
             (bore_r, 0)                        
         ]
-        p2 = cq.Workplane("XZ").polyline(pts2).revolve(360, (0,0,0), (0,0,1))
+        p2 = cq.Workplane("XZ").polyline(pts2).close().revolve()
 
         # Part 1: Top Clamping Plate
         p1 = cq.Workplane("XY").circle(fixture_r).extrude(h_plate)
         p1 = p1.faces(">Z").workplane().circle(disc_r - 2.0).cutThruAll()
         
-        vents_added = False
-        vents = cq.Workplane("XY")
-        for r_vent in [disc_r + 4.0, disc_r + 8.0]:
-            if r_vent < bolt_circle_r - 4.0:
-                n_holes = int((2 * np.pi * r_vent) / 5.0)
-                if n_holes > 0:
-                    vents_added = True
-                    for i in range(n_holes):
-                        ang = np.radians(i * (360 / n_holes))
-                        vx, vy = r_vent * np.cos(ang), r_vent * np.sin(ang)
-                        vents = vents.center(vx, vy).circle(0.8).center(-vx, -vy)
+        # Robust Array Generation for Vent Holes (Part 1 Top Flange)
+        vent_pts = []
+        for r_vent in np.arange(bore_r + 3.0, disc_r - 1.0, 3.0):
+            n_holes = int((2 * np.pi * r_vent) / 5.0)
+            if n_holes > 0:
+                for i in range(n_holes):
+                    ang = np.radians(i * (360 / n_holes))
+                    vent_pts.append((r_vent * np.cos(ang), r_vent * np.sin(ang)))
         
-        if vents_added:
-            vents = vents.extrude(100).translate((0,0,-50))
-            p1 = p1.cut(vents)
+        if vent_pts:
+            vents_tool = (cq.Workplane("XY")
+                          .pushPoints(vent_pts)
+                          .circle(1.0)
+                          .extrude(100)
+                          .translate((0, 0, -50)))
+            p1 = p1.cut(vents_tool)
 
         # ----------------------------------------------------------------------
-        # 2. Global Boolean Cutting (Zero Exception Holes)
+        # 2. Global Boolean Cutting (Zero Exception Fastener Holes)
         # ----------------------------------------------------------------------
         
-        # Define massive tools to core out holes seamlessly across all stacked parts
-        holes_tool = cq.Workplane("XY")
-        for i in range(4):
-            ang = np.radians(i * 90)
-            bx, by = bolt_circle_r * np.cos(ang), bolt_circle_r * np.sin(ang)
-            holes_tool = holes_tool.center(bx, by).circle(3.5).center(-bx, -by)
-            
-        for i in range(2):
-            ang = np.radians(i * 180 + 45)
-            dx, dy = bolt_circle_r * np.cos(ang), bolt_circle_r * np.sin(ang)
-            holes_tool = holes_tool.center(dx, dy).circle(3.1).center(-dx, -dy)
-            
-        holes_tool = holes_tool.extrude(200).translate((0,0,-50))
+        bolt_pts = [(bolt_circle_r * np.cos(np.radians(i * 90)), bolt_circle_r * np.sin(np.radians(i * 90))) for i in range(4)]
+        dowel_pts = [(bolt_circle_r * np.cos(np.radians(i * 180 + 45)), bolt_circle_r * np.sin(np.radians(i * 180 + 45))) for i in range(2)]
+        
+        holes_tool = (cq.Workplane("XY")
+                      .pushPoints(bolt_pts).circle(3.5)
+                      .pushPoints(dowel_pts).circle(3.1)
+                      .extrude(200)
+                      .translate((0, 0, -50)))
 
-        # Apply global cuts safely
+        # Apply global cuts safely across all components
         p6 = p6.cut(holes_tool)
         p10 = p10.cut(holes_tool)
         p5 = p5.cut(holes_tool)
@@ -264,15 +258,11 @@ with tab2:
         assy.add(p2, name="TopCavityInsert", loc=cq.Location(cq.Vector(0, 0, z_p2)), color=cq.Color(0.8, 0.8, 0.85))
         assy.add(p1, name="TopClampingPlate", loc=cq.Location(cq.Vector(0, 0, z_p1)), color=cq.Color(0.7, 0.7, 0.75))
 
-        for i in range(4):
-            ang = np.radians(i * 90)
-            bx, by = bolt_circle_r * np.cos(ang), bolt_circle_r * np.sin(ang)
-            assy.add(actual_bolt, name=f"ShoulderBolt_M6_{i}", loc=cq.Location(cq.Vector(bx, by, -2.0)), color=cq.Color(0.4, 0.4, 0.45))
+        for pt in bolt_pts:
+            assy.add(actual_bolt, name="ShoulderBolt_M6", loc=cq.Location(cq.Vector(pt[0], pt[1], -2.0)), color=cq.Color(0.4, 0.4, 0.45))
 
-        for i in range(2):
-            ang = np.radians(i * 180 + 45)
-            dx, dy = bolt_circle_r * np.cos(ang), bolt_circle_r * np.sin(ang)
-            assy.add(actual_dowel, name=f"DowelPin_{i}", loc=cq.Location(cq.Vector(dx, dy, 0.0)), color=cq.Color(0.5, 0.5, 0.5))
+        for pt in dowel_pts:
+            assy.add(actual_dowel, name="DowelPin", loc=cq.Location(cq.Vector(pt[0], pt[1], 0.0)), color=cq.Color(0.5, 0.5, 0.5))
 
         return assy, z_p4 + (h_w / 2.0)
 
@@ -282,8 +272,8 @@ with tab2:
                 assy, z_mid = generate_modular_pda_fixture(disc_dia, waist_dia, h_disc, h_waist)
                 compound = assy.toCompound()
                 
-                # Tessellate for Plotly 3D Render
-                vertices, triangles = compound.tessellate(0.2)
+                # Tessellate for Plotly 3D Render (Reduced resolution slightly for snappier UI loading)
+                vertices, triangles = compound.tessellate(0.5)
                 
                 if not vertices or not triangles:
                     raise ValueError("Generated geometry resulted in an empty mesh.")
