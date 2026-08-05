@@ -78,43 +78,13 @@ with tab1:
     ax1.grid(True, alpha=0.3)
     st.pyplot(fig1)
 
-    st.subheader("Automated Design Space Optimization")
-    if st.button("Run L-BFGS-B Optimization Routine", type="secondary"):
-        with st.spinner("Optimizing wire parameters against target mechanical bounds..."):
-            def objective(x):
-                n_inner, d_inner, n_outer, d_outer = x
-                k_i = 0.05 * (d_inner**4) * n_inner
-                k_o = 0.03 * (d_outer**4) * n_outer
-                f_val = (k_i * (1.5**1.2)) + (k_o * (1.5**1.1))
-                ei_i = (n_inner * E_eff * np.pi * (d_inner**4) / 64.0)
-                ei_o = (n_outer * E_eff * np.pi * (d_outer**4) / 64.0)
-                ei_tot = ei_i + ei_o
-                cost = ((f_val - 0.2) ** 2) * 150.0 + (ei_tot / 1200.0)
-                return cost
-
-            bounds_constraints = [(16, 72), (0.1, 0.25), (36, 144), (0.05, 0.15)]
-            res = minimize(objective, [36, 0.16, 72, 0.09], bounds=bounds_constraints, method='L-BFGS-B')
-            
-            if res.success:
-                opt_n1, opt_d1, opt_n2, opt_d2 = res.x
-                st.success("Optimization Successfully Converged!")
-                oc1, oc2 = st.columns(2)
-                with oc1:
-                    st.write(f"- **Optimized Inner Wire Count (N1):** {int(round(opt_n1))}")
-                    st.write(f"- **Optimized Inner Diameter (d1):** {opt_d1:.3f} mm")
-                with oc2:
-                    st.write(f"- **Optimized Outer Wire Count (N2):** {int(round(opt_n2))}")
-                    st.write(f"- **Optimized Outer Diameter (d2):** {opt_d2:.3f} mm")
-            else:
-                st.warning("Optimization did not converge within specified bounds.")
-
 
 # ==============================================================================
 # TAB 2: MODULAR HEAT-SETTING FIXTURE CAD & THERMAL STUDIO (PDHIF-01-ASSY)
 # ==============================================================================
 with tab2:
     st.header("Modular Heat-Setting Fixture Studio (Drawing No. PDHIF-01-ASSY)")
-    st.markdown("Precision parametric CAD generation mapped precisely to the engineering schematics. Employs unique indexing across sub-assembly elements.")
+    st.markdown("Precision parametric CAD generation engineered to explicitly model the **Nitinol Wire Guide Holes** on the Top Plate and the **Mesh Positioning Grooves** (Detail 8) on the Cavity Inserts.")
 
     cad_c1, cad_c2 = st.columns(2)
     with cad_c1:
@@ -129,7 +99,7 @@ with tab2:
         st.subheader("Thermal Processing Setup")
         temp = st.number_input("Target Setting Temperature (°C)", 400, 600, 500, key="t2_temp")
         soak_time = st.number_input("Soak Time (mins)", 5, 60, 15, key="t2_soak")
-        st.info("**Materials & Finish (Sec. 8):** Parts 1, 2, 5, 6, 7, 10: 17-4 PH SS (H900, Ra ≤ 0.4 µm). Part 4: Alumina Ceramic 99.7% (Ra ≤ 0.2 µm). Part 3: Dowels (6.0 h7).")
+        st.info("**Materials & Finish (Sec. 8):** Parts 1, 2, 5, 6, 7, 10: 17-4 PH SS. Part 4: Alumina Ceramic 99.7%.")
 
     def generate_modular_pda_fixture(d_disc, d_waist, h_d, h_w):
         # Master Dimensions
@@ -188,29 +158,51 @@ with tab2:
         ]
         p2 = cq.Workplane("XZ").polyline(pts2).close().revolve()
 
-        # Part 1: Top Clamping Plate
-        p1 = cq.Workplane("XY").circle(fixture_r).extrude(h_plate)
-        p1 = p1.faces(">Z").workplane().circle(disc_r - 2.0).cutThruAll()
+        # ----------------------------------------------------------------------
+        # NEW: Mesh Positioning Grooves (Item 8) - 0.3mm deep x 1.5mm wide
+        # ----------------------------------------------------------------------
+        # 36 cross-cuts create 72 total radial slots on the clamping flanges
+        groove_cutter = cq.Workplane("XY").box(fixture_r * 2.5, 1.5, 0.6)
         
-        # Array Generation for Vent Holes
-        vent_pts = []
-        for r_vent in np.arange(bore_r + 3.0, disc_r - 1.0, 3.0):
-            n_holes = int((2 * np.pi * r_vent) / 5.0)
+        for i in range(36):
+            ang = i * (180 / 36)
+            rc = groove_cutter.rotate((0,0,0), (0,0,1), ang)
+            # Cut Top Cavity Insert (P2) top flat face at Z = h_d
+            p2 = p2.cut(rc.translate((0, 0, h_d)))
+            # Cut Bottom Cavity Insert (P5) bottom flat face at Z = 0
+            p5 = p5.cut(rc.translate((0, 0, 0)))
+
+        # ----------------------------------------------------------------------
+        # NEW: Top Clamping Plate (Part 1) with Dense Wire Guide/Vent Holes
+        # ----------------------------------------------------------------------
+        p1 = cq.Workplane("XY").circle(fixture_r).extrude(h_plate)
+        
+        # Central hole (for hub/crimping tube)
+        p1 = p1.faces(">Z").workplane().circle(bore_r).cutThruAll()
+        
+        # Dense Concentric Array of Nitinol Wire Guide Holes (1.0mm diameter)
+        wire_holes_pts = []
+        hole_dia = 1.0 
+        
+        # Generate rings from just outside the center bore to the edge of the disc cavity
+        for r_ring in np.arange(bore_r + 2.5, disc_r - 1.0, 2.5):
+            circumference = 2 * np.pi * r_ring
+            n_holes = int(circumference / (hole_dia * 2.2)) # Dense spacing
             if n_holes > 0:
                 for i in range(n_holes):
                     ang = np.radians(i * (360 / n_holes))
-                    vent_pts.append((r_vent * np.cos(ang), r_vent * np.sin(ang)))
-        
-        if vent_pts:
-            vents_tool = (cq.Workplane("XY")
-                          .pushPoints(vent_pts)
-                          .circle(1.0)
-                          .extrude(100)
-                          .translate((0, 0, -50)))
-            p1 = p1.cut(vents_tool)
+                    wire_holes_pts.append((r_ring * np.cos(ang), r_ring * np.sin(ang)))
+                    
+        if wire_holes_pts:
+            wire_holes_tool = (cq.Workplane("XY")
+                               .pushPoints(wire_holes_pts)
+                               .circle(hole_dia / 2.0)
+                               .extrude(h_plate + 10)
+                               .translate((0, 0, -5)))
+            p1 = p1.cut(wire_holes_tool)
 
         # ----------------------------------------------------------------------
-        # 2. Global Boolean Cutting
+        # 2. Global Boolean Cutting (Fastener Holes)
         # ----------------------------------------------------------------------
         
         bolt_pts = [(bolt_circle_r * np.cos(np.radians(i * 90)), bolt_circle_r * np.sin(np.radians(i * 90))) for i in range(4)]
@@ -241,7 +233,7 @@ with tab2:
         actual_dowel = cq.Workplane("XY").circle(3.0).extrude(dowel_len)
 
         # ----------------------------------------------------------------------
-        # 4. Precision Vertical Stacking & Unique Named Compilation
+        # 4. Precision Vertical Stacking & Compilation
         # ----------------------------------------------------------------------
         
         z_stop = h_plate
@@ -273,7 +265,7 @@ with tab2:
                 compound = assy.toCompound()
                 
                 # Tessellate for Plotly 3D Render
-                vertices, triangles = compound.tessellate(0.5)
+                vertices, triangles = compound.tessellate(0.4)
                 
                 if not vertices or not triangles:
                     raise ValueError("Generated geometry resulted in an empty mesh.")
