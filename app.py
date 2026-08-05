@@ -161,15 +161,14 @@ with tab2:
                      .faces(">Z").workplane().circle(disc_r - 1.0).cutThruAll())
         assy.add(comp_stop, name="CompressionStop", loc=cq.Location(cq.Vector(0, 0, 8.0)), color=cq.Color(0.7, 0.7, 0.75))
 
-        # 3. Bottom Cavity Insert / Disc Former (Part 5) - Robust profile avoiding GC_MakeArcOfCircle errors
+        # 3. Bottom Cavity Insert / Disc Former (Part 5) - Robust profile generation without selector errors
         bot_insert = (cq.Workplane("XZ")
                       .moveTo(bore_r + 0.05, 0)
                       .lineTo(disc_r + 0.1, 0)
                       .lineTo(disc_r + 0.1, h_d)
                       .lineTo(bore_r + 0.05, h_d)
                       .close()
-                      .revolve(360, (0, 0, 0), (0, 0, 1))
-                      .edges("|Y").fillet(min(0.8, h_d * 0.25)))
+                      .revolve(360, (0, 0, 0), (0, 0, 1)))
         assy.add(bot_insert, name="BottomCavityInsert", loc=cq.Location(cq.Vector(0, 0, 9.0)), color=cq.Color(0.85, 0.85, 0.9))
 
         # 4. Ceramic Waist Core (Part 4) - Alumina Ceramic 99.7%
@@ -186,8 +185,7 @@ with tab2:
                       .lineTo(disc_r + 0.1, h_d)
                       .lineTo(bore_r + 0.05, h_d)
                       .close()
-                      .revolve(360, (0, 0, 0), (0, 0, 1))
-                      .edges("|Y").fillet(min(0.8, h_d * 0.25)))
+                      .revolve(360, (0, 0, 0), (0, 0, 1)))
         assy.add(top_insert, name="TopCavityInsert", loc=cq.Location(cq.Vector(0, 0, 9.0 + h_d + h_w)), color=cq.Color(0.85, 0.85, 0.9))
 
         # 6. Top Clamping Plate (Part 1) - 17-4 PH Stainless Steel
