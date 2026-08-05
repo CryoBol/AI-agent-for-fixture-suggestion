@@ -8,7 +8,7 @@ import cadquery as cq
 st.set_page_config(page_title="PDA Occluder Heat-Setting Fixture Suite", layout="wide")
 
 st.title("🔬 PDA Occluder Heat-Setting Fixture & Dual-Layer Mechanics Studio")
-st.markdown("Integrated computational platform conforming to Drawing No. **PDHIF-01-ASSY** (Design 1: Original Standard Modular Fixture). Combines Nitinol braid mechanics, optimization, and robust parametric CAD fixture generation.")
+st.markdown("Integrated computational platform conforming to Drawing No. **PDHIF-01-ASSY** (Design 1: Original Standard Modular Fixture). Combines Nitinol braid mechanics, optimization, and refined parametric CAD fixture generation.")
 
 # Multi-Tab Layout
 tab1, tab2 = st.tabs(["1. Dual-Layer Mechanics & Optimization Engine", "2. Modular Heat-Setting Fixture CAD & Thermal Studio"])
@@ -132,8 +132,8 @@ with tab2:
         st.info("**Materials & Finish (Sec. 8):** Parts 1, 2, 5, 6, 7, 10: 17-4 PH SS (H900, Ra <= 0.4 µm). Part 4: Alumina Ceramic 99.7% (Ra <= 0.2 µm). Part 3: Dowels (6.0 h7).")
 
     def generate_modular_pda_fixture(d_disc, d_waist, h_tot, h_d, h_w):
-        plate_r = (d_disc / 2.0) + 10.0
-        bolt_circle_r = plate_r - 5.0
+        plate_r = (d_disc / 2.0) + 12.0
+        bolt_circle_r = plate_r - 6.0
         bore_r = d_waist / 2.0
         disc_r = d_disc / 2.0
 
@@ -143,7 +143,7 @@ with tab2:
         bottom_plate = (cq.Workplane("XY")
                         .circle(plate_r).extrude(6.0)
                         .faces(">Z").workplane()
-                        .circle(plate_r - 2.0).extrude(2.0))
+                        .circle(plate_r - 2.5).extrude(2.0))
         for i in range(4):
             ang = np.radians(i * 90)
             bx, by = bolt_circle_r * np.cos(ang), bolt_circle_r * np.sin(ang)
@@ -157,33 +157,39 @@ with tab2:
 
         # 2. Compression Stop / Spacer Ring (Part 10) - 17-4 PH Stainless Steel
         comp_stop = (cq.Workplane("XY")
-                     .circle(disc_r + 2.0).extrude(1.0)
-                     .faces(">Z").workplane().circle(disc_r - 1.0).cutThruAll())
+                     .circle(disc_r + 3.0).extrude(1.0)
+                     .faces(">Z").workplane().circle(disc_r - 1.5).cutThruAll())
         assy.add(comp_stop, name="CompressionStop", loc=cq.Location(cq.Vector(0, 0, 8.0)), color=cq.Color(0.7, 0.7, 0.75))
 
-        # 3. Bottom Cavity Insert / Disc Former (Part 5) - Robust profile generation without selector errors
+        # 3. Bottom Cavity Insert / Disc Former (Part 5) - Accurate concave funnel profile matching technical drawing Section 6
         bot_insert = (cq.Workplane("XZ")
                       .moveTo(bore_r + 0.05, 0)
                       .lineTo(disc_r + 0.1, 0)
                       .lineTo(disc_r + 0.1, h_d)
-                      .lineTo(bore_r + 0.05, h_d)
+                      .threePointArc((disc_r * 0.5, h_d * 0.7), (bore_r + 0.05, h_d))
                       .close()
                       .revolve(360, (0, 0, 0), (0, 0, 1)))
         assy.add(bot_insert, name="BottomCavityInsert", loc=cq.Location(cq.Vector(0, 0, 9.0)), color=cq.Color(0.85, 0.85, 0.9))
 
-        # 4. Ceramic Waist Core (Part 4) - Alumina Ceramic 99.7%
-        ceramic_core_solid = (cq.Workplane("XY").circle(bore_r + 1.2).extrude(h_w)
-                              .faces(">Z").chamfer(0.5)
-                              .faces("<Z").chamfer(0.5)
-                              .faces(">Z").workplane().circle(bore_r).cutThruAll())
-        assy.add(ceramic_core_solid, name="CeramicWaistCore", loc=cq.Location(cq.Vector(0, 0, 9.0 + h_d)), color=cq.Color(0.95, 0.95, 0.90))
+        # 4. Ceramic Waist Core (Part 4) - Alumina Ceramic 99.7% with precise hourglass contour
+        ceramic_core = (cq.Workplane("XZ")
+                        .moveTo(bore_r + 1.5, 0)
+                        .lineTo(bore_r, 0)
+                        .threePointArc((bore_r + 0.3, h_w / 2.0), (bore_r, h_w))
+                        .lineTo(bore_r + 1.5, h_w)
+                        .lineTo(bore_r + 1.5, 0)
+                        .close()
+                        .revolve(360, (0, 0, 0), (0, 0, 1))
+                        .faces(">Z").chamfer(0.4)
+                        .faces("<Z").chamfer(0.4))
+        assy.add(ceramic_core, name="CeramicWaistCore", loc=cq.Location(cq.Vector(0, 0, 9.0 + h_d)), color=cq.Color(0.95, 0.95, 0.90))
 
-        # 5. Top Cavity Insert / Disc Former (Part 2) - 17-4 PH Stainless Steel
+        # 5. Top Cavity Insert / Disc Former (Part 2) - 17-4 PH Stainless Steel matching Section 6
         top_insert = (cq.Workplane("XZ")
                       .moveTo(bore_r + 0.05, 0)
                       .lineTo(disc_r + 0.1, 0)
                       .lineTo(disc_r + 0.1, h_d)
-                      .lineTo(bore_r + 0.05, h_d)
+                      .threePointArc((disc_r * 0.5, h_d * 0.7), (bore_r + 0.05, h_d))
                       .close()
                       .revolve(360, (0, 0, 0), (0, 0, 1)))
         assy.add(top_insert, name="TopCavityInsert", loc=cq.Location(cq.Vector(0, 0, 9.0 + h_d + h_w)), color=cq.Color(0.85, 0.85, 0.9))
