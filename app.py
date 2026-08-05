@@ -24,109 +24,122 @@ fixture_material = st.sidebar.selectbox("Fixture Material", ["17-4 PH Stainless 
 
 # --- CAD GENERATION MODULE (MATCHING REFERENCE IMAGES) ---
 
-def generate_design1_assembly(w_dia, d_dia, lg, hole_count):
-    # 1. Base (Top large flange)
+def generate_design1_assembly(w_dia, d_dia, lg, wire_count):
+    # 1. Base Stand
     base = (cq.Workplane("XY")
-            .circle(d_dia/2 + 20).extrude(12)
+            .circle(d_dia/2 + 25).extrude(10)
             .faces(">Z").workplane()
-            .circle(6).cutThruAll())
+            .circle(d_dia/2 + 15).extrude(8)
+            .faces(">Z").workplane().circle(6).cutThruAll())
 
-    # 2. Clamping Plates (Top & Bottom)
-    plate_rad = d_dia/2 + 10
+    # 2. Retention Plates (Top and Bottom) with Wire Locating Holes
+    plate_rad = d_dia/2 + 15
     plate = (cq.Workplane("XY")
-             .circle(plate_rad).extrude(6)
-             .faces(">Z").workplane()
-             .circle(6).cutThruAll()
-             .faces(">Z").workplane()
-             .polarArray(plate_rad - 4, 0, 360, 4).circle(2.5).cutThruAll())
+             .circle(plate_rad).extrude(4)
+             .faces(">Z").workplane().circle(6).cutThruAll()
+             # Outer ring for clamping bolts
+             .faces(">Z").workplane().polarArray(plate_rad - 4, 0, 360, 6).circle(2.0).cutThruAll()
+             # Inner matrices for Nitinol wire locating holes (concentric rings)
+             .faces(">Z").workplane().polarArray(d_dia/2 + 5, 0, 360, int(wire_count/2)).circle(0.8).cutThruAll()
+             .faces(">Z").workplane().polarArray(d_dia/2, 0, 360, int(wire_count/2)).circle(0.8).cutThruAll())
 
-    # 3. Core (Curved Hourglass matching the blue insert)
+    # 3. Precision Ceramic Waist Core
     core = (cq.Workplane("XZ")
             .moveTo(6, 0)
-            .lineTo(d_dia/2, 0)
-            .threePointArc((w_dia/2, lg/2), (d_dia/2, lg))
+            .lineTo(d_dia/2 - 2, 0)
+            .threePointArc((w_dia/2, lg/2), (d_dia/2 - 2, lg))
             .lineTo(6, lg)
             .close()
             .revolve(360, (0,0,0), (0,0,1)))
 
-    # 4. Alignment Pins
-    pin = cq.Workplane("XY").circle(2.4).extrude(lg + 12 + 10) 
+    # 4. Assembly Bolts
+    bolt = cq.Workplane("XY").circle(1.8).extrude(lg + 18)
 
     assy = cq.Assembly(name="Design1_Original")
-    assy.add(base, name="Base", loc=cq.Location(cq.Vector(0,0, lg + 12)), color=cq.Color(0.5, 0.6, 0.6))
-    assy.add(plate, name="TopPlate", loc=cq.Location(cq.Vector(0,0, lg + 6)), color=cq.Color(0.7, 0.7, 0.7))
-    assy.add(core, name="Core", loc=cq.Location(cq.Vector(0,0, 6)), color=cq.Color(0.7, 0.8, 1.0)) 
-    assy.add(plate, name="BottomPlate", loc=cq.Location(cq.Vector(0,0, 0)), color=cq.Color(0.7, 0.7, 0.7))
+    assy.add(base, name="BaseStand", color=cq.Color(0.6, 0.6, 0.6))
+    assy.add(plate, name="BottomRetentionPlate", loc=cq.Location(cq.Vector(0,0, 18)), color=cq.Color(0.8, 0.8, 0.8))
+    assy.add(core, name="CeramicCore", loc=cq.Location(cq.Vector(0,0, 22)), color=cq.Color(0.2, 0.2, 0.2)) # Dark ceramic
+    assy.add(plate, name="TopRetentionPlate", loc=cq.Location(cq.Vector(0,0, 22 + lg)), color=cq.Color(0.8, 0.8, 0.8))
 
-    for i in range(4):
-        angle = np.radians(i * 90 + 45)
+    for i in range(6):
+        angle = np.radians(i * 60)
         x = (plate_rad - 4) * np.cos(angle)
         y = (plate_rad - 4) * np.sin(angle)
-        assy.add(pin, name=f"Pin_{i}", loc=cq.Location(cq.Vector(x, y, -2)), color=cq.Color(0.8, 0.8, 0.8))
+        assy.add(bolt, name=f"Bolt_{i}", loc=cq.Location(cq.Vector(x, y, 10)), color=cq.Color(0.4, 0.4, 0.4))
 
     return assy
 
+def generate_design2_assembly(w_dia, d_dia, lg, wire_count):
+    # Matches the highly contoured "Combined Ceramic/Mesh Insert" in image_7f5c7a18.jpg
+    plate_rad = d_dia/2 + 15
+    
+    # Self Aligning Plate (with step lip)
+    align_plate = (cq.Workplane("XY")
+             .circle(plate_rad).extrude(6)
+             .faces(">Z").workplane().circle(plate_rad - 5).extrude(2)
+             .faces(">Z").workplane().circle(6).cutThruAll()
+             .faces(">Z").workplane().polarArray(d_dia/2 + 5, 0, 360, wire_count).circle(0.8).cutThruAll())
 
-def generate_design2_assembly(w_dia, d_dia, lg, hole_count):
-    flange_t = 10
-    flange_rad = d_dia/2 + 15
-    inner_hole = 5
-
-    # 2D cross-section sketch revolved 360 degrees for a perfect spool
-    spool = (cq.Workplane("XZ")
-             .moveTo(inner_hole, 0)
-             .lineTo(flange_rad, 0)
-             .lineTo(flange_rad, flange_t)
-             .lineTo(d_dia/2, flange_t)
-             .threePointArc((w_dia/2, flange_t + lg/2), (d_dia/2, flange_t + lg))
-             .lineTo(flange_rad, flange_t + lg)
-             .lineTo(flange_rad, flange_t * 2 + lg)
-             .lineTo(inner_hole, flange_t * 2 + lg)
-             .close()
-             .revolve(360, (0,0,0), (0,0,1)))
+    # Contoured Integrated Core
+    core = (cq.Workplane("XZ")
+            .moveTo(6, 0)
+            .lineTo(plate_rad - 5, 0)
+            .lineTo(plate_rad - 5, 4)
+            .threePointArc((w_dia/2, lg/2), (plate_rad - 5, lg - 4))
+            .lineTo(plate_rad - 5, lg)
+            .lineTo(6, lg)
+            .close()
+            .revolve(360, (0,0,0), (0,0,1)))
 
     assy = cq.Assembly(name="Design2_Integrated")
-    assy.add(spool, name="Spool", color=cq.Color(0.6, 0.65, 0.7))
+    assy.add(align_plate, name="BottomAlignPlate", color=cq.Color(0.7, 0.7, 0.7))
+    assy.add(core, name="IntegratedCore", loc=cq.Location(cq.Vector(0,0, 8)), color=cq.Color(0.6, 0.6, 0.6))
+    
+    # Invert top plate
+    top_plate = align_plate.rotate((0,0,0), (1,0,0), 180)
+    assy.add(top_plate, name="TopAlignPlate", loc=cq.Location(cq.Vector(0,0, 8 + lg + 8)), color=cq.Color(0.7, 0.7, 0.7))
+    
     return assy
 
-
-def generate_design3_assembly(w_dia, d_dia, lg, hole_count):
+def generate_design3_assembly(w_dia, d_dia, lg, wire_count):
+    # Matches the "Radial Tensioning" design with Mandrel and Compression Ring
     outer_rad = d_dia/2 + 25
-    height = lg + 12
-    inner_hole = 6
-
-    # 1. Outer heavy drum with a recessed cup
-    drum = (cq.Workplane("XY")
-            .circle(outer_rad).extrude(height)
+    inner_rad = d_dia/2 + 5
+    
+    # Base with Centering Mandrel built-in
+    base_mandrel = (cq.Workplane("XY")
+            .circle(outer_rad).extrude(10)
             .faces(">Z").workplane()
-            .circle(outer_rad - 6).cutBlind(-height + 8) 
-            .faces("<Z").workplane()
-            .circle(inner_hole).cutThruAll())
+            .circle(inner_rad - 1).extrude(lg + 2)
+            .faces(">Z").workplane().circle(6).cutThruAll())
 
-    # 2. Inner Hub 
-    hub = (cq.Workplane("XY")
-           .circle(d_dia/2 + 4).extrude(height - 4)
-           .faces(">Z").workplane()
-           .circle(inner_hole).cutThruAll())
+    # Outer Compression Ring
+    comp_ring = (cq.Workplane("XY")
+                 .circle(outer_rad).circle(inner_rad).extrude(lg + 2))
+                 
+    # Top Retention Plate (with mesh locators)
+    top_plate = (cq.Workplane("XY")
+                 .circle(outer_rad).extrude(5)
+                 .faces(">Z").workplane().circle(6).cutThruAll()
+                 .faces(">Z").workplane().polarArray(d_dia/2 + 2, 0, 360, wire_count).circle(0.8).cutThruAll())
 
-    # 3. Radial Pins
-    pin = cq.Workplane("YZ").circle(2).extrude(10)
+    # Radial Tensioning Clamps (Bolts)
+    clamp = cq.Workplane("YZ").circle(2.5).extrude(15)
 
     assy = cq.Assembly(name="Design3_Radial")
-    assy.add(drum, name="OuterDrum", color=cq.Color(0.55, 0.6, 0.65))
-    assy.add(hub, name="CenterHub", loc=cq.Location(cq.Vector(0,0,4)), color=cq.Color(0.7, 0.7, 0.7))
+    assy.add(base_mandrel, name="CenteringMandrel", color=cq.Color(0.5, 0.5, 0.5))
+    assy.add(comp_ring, name="CompressionRing", loc=cq.Location(cq.Vector(0,0, 10)), color=cq.Color(0.3, 0.3, 0.3))
+    assy.add(top_plate, name="TopPlate", loc=cq.Location(cq.Vector(0,0, 10 + lg + 2)), color=cq.Color(0.7, 0.7, 0.7))
 
     for i in range(8):
         angle = np.radians(i * 45)
-        x = outer_rad * np.cos(angle)
-        y = outer_rad * np.sin(angle)
-        z = height / 2
-        # Translate to edge, rotate to face outward
+        x = (outer_rad + 2) * np.cos(angle)
+        y = (outer_rad + 2) * np.sin(angle)
+        z = 10 + (lg/2)
         loc = cq.Location(cq.Vector(x, y, z)) * cq.Location(cq.Vector(0,0,0), cq.Vector(0,0,1), i*45)
-        assy.add(pin, name=f"Pin_{i}", loc=loc, color=cq.Color(0.8, 0.8, 0.8))
+        assy.add(clamp, name=f"RadialClamp_{i}", loc=loc, color=cq.Color(0.8, 0.8, 0.8))
 
     return assy
-
 
 # --- SURFACE FEM MAPPING MODULE ---
 def render_surface_thermal_model(design_id, w_dia, d_dia, lg, temp, soak_time, material):
