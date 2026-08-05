@@ -114,7 +114,7 @@ with tab1:
 # ==============================================================================
 with tab2:
     st.header("Modular Heat-Setting Fixture Studio (Drawing No. PDHIF-01-ASSY)")
-    st.markdown("Precision parametric CAD generation mapped precisely to the engineering schematics. Features robust `pushPoints()` and strict `.close()` wire topology closures to prevent geometry engine failure.")
+    st.markdown("Precision parametric CAD generation mapped precisely to the engineering schematics. Employs unique indexing across sub-assembly elements.")
 
     cad_c1, cad_c2 = st.columns(2)
     with cad_c1:
@@ -144,7 +144,7 @@ with tab2:
         assy = cq.Assembly(name="PDHIF_01_ASSY")
 
         # ----------------------------------------------------------------------
-        # 1. Base Parts Creation (Zero Exception Topology)
+        # 1. Base Parts Creation
         # ----------------------------------------------------------------------
         
         # Part 6: Bottom Support Plate
@@ -156,7 +156,6 @@ with tab2:
         p10 = p10.faces(">Z").workplane().circle(disc_r + 2.0).cutThruAll()
 
         # Part 5: Bottom Cavity Insert (Revolved Funnel)
-        # Using explicit .close() cleanly resolves the internal cavity taper
         pts5 = [
             (bore_r, h_d),                     
             (bore_r + 3.0, h_d),               
@@ -193,7 +192,7 @@ with tab2:
         p1 = cq.Workplane("XY").circle(fixture_r).extrude(h_plate)
         p1 = p1.faces(">Z").workplane().circle(disc_r - 2.0).cutThruAll()
         
-        # Robust Array Generation for Vent Holes (Part 1 Top Flange)
+        # Array Generation for Vent Holes
         vent_pts = []
         for r_vent in np.arange(bore_r + 3.0, disc_r - 1.0, 3.0):
             n_holes = int((2 * np.pi * r_vent) / 5.0)
@@ -211,7 +210,7 @@ with tab2:
             p1 = p1.cut(vents_tool)
 
         # ----------------------------------------------------------------------
-        # 2. Global Boolean Cutting (Zero Exception Fastener Holes)
+        # 2. Global Boolean Cutting
         # ----------------------------------------------------------------------
         
         bolt_pts = [(bolt_circle_r * np.cos(np.radians(i * 90)), bolt_circle_r * np.sin(np.radians(i * 90))) for i in range(4)]
@@ -223,7 +222,7 @@ with tab2:
                       .extrude(200)
                       .translate((0, 0, -50)))
 
-        # Apply global cuts safely across all components
+        # Apply global cuts cleanly across stacked parts
         p6 = p6.cut(holes_tool)
         p10 = p10.cut(holes_tool)
         p5 = p5.cut(holes_tool)
@@ -242,7 +241,7 @@ with tab2:
         actual_dowel = cq.Workplane("XY").circle(3.0).extrude(dowel_len)
 
         # ----------------------------------------------------------------------
-        # 4. Precision Vertical Stacking & Compilation
+        # 4. Precision Vertical Stacking & Unique Named Compilation
         # ----------------------------------------------------------------------
         
         z_stop = h_plate
@@ -258,11 +257,12 @@ with tab2:
         assy.add(p2, name="TopCavityInsert", loc=cq.Location(cq.Vector(0, 0, z_p2)), color=cq.Color(0.8, 0.8, 0.85))
         assy.add(p1, name="TopClampingPlate", loc=cq.Location(cq.Vector(0, 0, z_p1)), color=cq.Color(0.7, 0.7, 0.75))
 
-        for pt in bolt_pts:
-            assy.add(actual_bolt, name="ShoulderBolt_M6", loc=cq.Location(cq.Vector(pt[0], pt[1], -2.0)), color=cq.Color(0.4, 0.4, 0.45))
+        # Enforce unique indexing per fastener instance
+        for i, pt in enumerate(bolt_pts):
+            assy.add(actual_bolt, name=f"ShoulderBolt_M6_{i}", loc=cq.Location(cq.Vector(pt[0], pt[1], -2.0)), color=cq.Color(0.4, 0.4, 0.45))
 
-        for pt in dowel_pts:
-            assy.add(actual_dowel, name="DowelPin", loc=cq.Location(cq.Vector(pt[0], pt[1], 0.0)), color=cq.Color(0.5, 0.5, 0.5))
+        for i, pt in enumerate(dowel_pts):
+            assy.add(actual_dowel, name=f"DowelPin_{i}", loc=cq.Location(cq.Vector(pt[0], pt[1], 0.0)), color=cq.Color(0.5, 0.5, 0.5))
 
         return assy, z_p4 + (h_w / 2.0)
 
@@ -272,7 +272,7 @@ with tab2:
                 assy, z_mid = generate_modular_pda_fixture(disc_dia, waist_dia, h_disc, h_waist)
                 compound = assy.toCompound()
                 
-                # Tessellate for Plotly 3D Render (Reduced resolution slightly for snappier UI loading)
+                # Tessellate for Plotly 3D Render
                 vertices, triangles = compound.tessellate(0.5)
                 
                 if not vertices or not triangles:
