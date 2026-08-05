@@ -22,7 +22,7 @@ with tab1:
     col_t1, col_t2 = st.columns(2)
     with col_t1:
         st.subheader("Macro Geometry & Inner Core")
-        D_macro = st.slider("Waist Diameter (D_waist mm)", 4.0, 30.0, 12.0, 0.5, key="t1_D")
+        D_macro = st.slider("Waist Diameter (D_waist mm)", 4.0, 30.0, 8.0, 0.5, key="t1_D")
         P_macro = st.slider("Pitch Length / Pic Length (mm)", 1.0, 10.0, 4.0, 0.2, key="t1_P")
         N1 = st.slider("Inner Wire Count (N1)", 16, 72, 36, 4, key="t1_N1")
         d1 = st.slider("Inner Wire Diameter (d1 mm)", 0.10, 0.30, 0.16, 0.01, key="t1_d1")
@@ -114,7 +114,7 @@ with tab1:
 # ==============================================================================
 with tab2:
     st.header("Modular Heat-Setting Fixture Studio (Drawing No. PDHIF-01-ASSY)")
-    st.markdown("Precision parametric CAD generation based on the 10-part modular architecture: Clamping Plates, Cavity Inserts, Replaceable Ceramic Waist Core, Spacer Ring, Dowel Pins, and M6 Shoulder Bolts.")
+    st.markdown("Precision parametric CAD generation based on the 10-part modular architecture conforming exactly to Technical Drawing PDHIF-01-ASSY.")
 
     cad_c1, cad_c2 = st.columns(2)
     with cad_c1:
@@ -155,42 +155,50 @@ with tab2:
 
         assy.add(bottom_plate, name="BottomSupportPlate", loc=cq.Location(cq.Vector(0, 0, 0)), color=cq.Color(0.75, 0.75, 0.8))
 
-        # 2. Compression Stop / Spacer Ring (Part 10) - 17-4 PH Stainless Steel
+        # 2. Compression Stop / Spacer Ring (Part 10) - 17-4 PH Stainless Steel (t_stop = 1.0 mm)
         comp_stop = (cq.Workplane("XY")
                      .circle(disc_r + 3.0).extrude(1.0)
                      .faces(">Z").workplane().circle(disc_r - 1.5).cutThruAll())
         assy.add(comp_stop, name="CompressionStop", loc=cq.Location(cq.Vector(0, 0, 8.0)), color=cq.Color(0.7, 0.7, 0.75))
 
-        # 3. Bottom Cavity Insert / Disc Former (Part 5) - Robust solid modeling avoiding topological failures
-        bot_insert = (cq.Workplane("XY")
-                      .circle(disc_r).extrude(h_d)
-                      .faces(">Z").workplane()
-                      .circle(bore_r).cutThruAll())
+        # 3. Bottom Cavity Insert / Disc Former (Part 5) - Accurate trumpet contour matching Section 6
+        bot_insert = (cq.Workplane("XZ")
+                      .moveTo(bore_r, 0)
+                      .lineTo(disc_r, 0)
+                      .lineTo(disc_r, h_d)
+                      .threePointArc(((disc_r + bore_r) / 2.0, h_d * 0.5), (bore_r, h_d))
+                      .close()
+                      .revolve(360, (0, 0, 0), (0, 0, 1)))
         assy.add(bot_insert, name="BottomCavityInsert", loc=cq.Location(cq.Vector(0, 0, 9.0)), color=cq.Color(0.85, 0.85, 0.9))
 
-        # 4. Ceramic Waist Core (Part 4) - Alumina Ceramic 99.7%
-        ceramic_core = (cq.Workplane("XY")
-                        .circle(bore_r + 1.5).extrude(h_w)
-                        .faces(">Z").chamfer(0.3)
-                        .faces("<Z").chamfer(0.3)
-                        .faces(">Z").workplane()
-                        .circle(bore_r).cutThruAll())
+        # 4. Ceramic Waist Core (Part 4) - Alumina Ceramic 99.7% with hourglass contour (Section 7)
+        ceramic_core = (cq.Workplane("XZ")
+                        .moveTo(bore_r + 1.2, 0)
+                        .lineTo(bore_r, 0)
+                        .threePointArc((bore_r + 0.2, h_w / 2.0), (bore_r, h_w))
+                        .lineTo(bore_r + 1.2, h_w)
+                        .close()
+                        .revolve(360, (0, 0, 0), (0, 0, 1)))
         assy.add(ceramic_core, name="CeramicWaistCore", loc=cq.Location(cq.Vector(0, 0, 9.0 + h_d)), color=cq.Color(0.95, 0.95, 0.90))
 
-        # 5. Top Cavity Insert / Disc Former (Part 2) - 17-4 PH Stainless Steel
-        top_insert = (cq.Workplane("XY")
-                      .circle(disc_r).extrude(h_d)
-                      .faces(">Z").workplane()
-                      .circle(bore_r).cutThruAll())
+        # 5. Top Cavity Insert / Disc Former (Part 2) - 17-4 PH Stainless Steel (Section 6)
+        top_insert = (cq.Workplane("XZ")
+                      .moveTo(bore_r, 0)
+                      .lineTo(disc_r, 0)
+                      .lineTo(disc_r, h_d)
+                      .threePointArc(((disc_r + bore_r) / 2.0, h_d * 0.5), (bore_r, h_d))
+                      .close()
+                      .revolve(360, (0, 0, 0), (0, 0, 1)))
         assy.add(top_insert, name="TopCavityInsert", loc=cq.Location(cq.Vector(0, 0, 9.0 + h_d + h_w)), color=cq.Color(0.85, 0.85, 0.9))
 
-        # 6. Top Clamping Plate (Part 1) - 17-4 PH Stainless Steel
+        # 6. Top Clamping Plate (Part 1) - 17-4 PH Stainless Steel with mesh positioning grooves (0.3 depth, 1.5 width)
         top_plate = (cq.Workplane("XY")
                      .circle(plate_r).extrude(6.0))
         for i in range(4):
             ang = np.radians(i * 90)
             bx, by = bolt_circle_r * np.cos(ang), bolt_circle_r * np.sin(ang)
             top_plate = top_plate.faces(">Z").workplane().transformed(offset=cq.Vector(bx, by, 0)).circle(3.3).cutThruAll()
+        # Vent holes (0.2.0 mm) and Mesh Positioning Grooves
         for i in range(12):
             ang = np.radians(i * 30)
             vx, vy = (disc_r - 6) * np.cos(ang), (disc_r - 6) * np.sin(ang)
