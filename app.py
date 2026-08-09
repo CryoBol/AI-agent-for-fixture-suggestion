@@ -173,13 +173,32 @@ ALPHA_CERAMIC = _alpha_mm2_per_s(CERAMIC_PROPS)
 
 # ------------------------------------------------------------------------
 # Geometry validation
+#
+# The bore->disc span (disc_r - bore_r) is the shared "budget" that every
+# downstream feature draws from: the boss/transition shoulders, the mesh
+# positioning grooves, AND the wire-guide channels. A purely proportional
+# cap (bore_r <= k*disc_r) lets that budget shrink to almost nothing in
+# absolute mm at small disc sizes even while staying under the ratio --
+# which is exactly what silently zeroed out the wire-guide grooves in one
+# boundary case before this was caught by testing. The cap is therefore a
+# COMBINATION of a proportional limit and an absolute-mm minimum span, and
+# every downstream radius (boss_r, transition_r, guide grooves, mesh
+# grooves) is derived as a bounded fraction of this guaranteed-positive
+# span, never a fixed offset that could exceed it.
 # ------------------------------------------------------------------------
-MAX_WAIST_TO_DISC_RATIO = 0.84  # d_waist / d_disc  ==  bore_r/disc_r <= 0.42
+MAX_WAIST_TO_DISC_RATIO = 0.84    # d_waist / d_disc soft cap (proportion)
+MIN_ABS_SPAN_MM = 2.5             # minimum disc_r - bore_r regardless of scale
+
+
+def _max_bore_r(disc_r):
+    min_span = max(MIN_ABS_SPAN_MM, 0.16 * disc_r)
+    return disc_r - min_span
 
 
 def max_waist_dia_for_disc(d_disc):
-    """Largest waist diameter that keeps the revolve profiles well-formed
-    (bore_r < boss_r < disc_r with margin) for a given disc diameter.
+    """Largest waist diameter that keeps the bore->disc span comfortably
+    positive (both proportionally and in absolute mm) for a given disc
+    diameter, so every downstream feature has room to fit.
 
     Floors (rather than rounds) to 1 decimal and backs off by a small
     epsilon so the UI can never offer a value that the stricter, exact
@@ -187,21 +206,23 @@ def max_waist_dia_for_disc(d_disc):
     previously let a boundary value the slider itself presented get
     rejected by validate_dims's unrounded check.
     """
-    raw_max = MAX_WAIST_TO_DISC_RATIO * d_disc
+    disc_r = d_disc / 2.0
+    raw_max = 2.0 * _max_bore_r(disc_r)
     return max(4.0, np.floor(raw_max * 10.0) / 10.0 - 0.01)
 
 
 def validate_dims(d_disc, d_waist, h_d, h_w):
     disc_r = d_disc / 2.0
     bore_r = d_waist / 2.0
-    max_bore_r = (MAX_WAIST_TO_DISC_RATIO / 2.0) * d_disc
+    max_bore_r = _max_bore_r(disc_r)
     if bore_r > max_bore_r:
         raise ValueError(
             f"Waist diameter {d_waist:.1f} mm is too large relative to disc diameter "
             f"{d_disc:.1f} mm (max supported waist for this disc size is "
             f"{2 * max_bore_r:.1f} mm). A PDA-style fixture needs the waist substantially "
-            f"narrower than the retention discs, and this ratio also keeps the insert "
-            f"funnel profile geometrically valid."
+            f"narrower than the retention discs, and this keeps at least "
+            f"{MIN_ABS_SPAN_MM:.1f} mm of radial room for the insert shoulders, positioning "
+            f"grooves, and wire-guide channels to fit without collapsing into each other."
         )
     if bore_r < 1.0:
         raise ValueError("Waist radius is too small to route a wire-guide bore (< 1.0 mm).")
@@ -334,31 +355,58 @@ def generate_modular_pda_fixture(d_disc, d_waist, h_d, h_w, groove_count=None):
             p2 = p2.cut(base_cutter_p2.rotate((0, 0, 0), (0, 0, 1), ang))
 
     # ----------------------------------------------------------------
-    # Part 1: Top Clamping Plate with nitinol wire-guide holes
+    # Part 1: Top Clamping Plate -- nitinol wire-guide channels
+    #
+    # The original design cut a very dense concentric field of ~1mm holes
+    # (over a hundred for a mid-size disc). Two problems: (1) at typical
+    # tessellation tolerance the holes render as an indistinct moire/"star"
+    # pattern rather than clearly resolved features, and (2) mechanically
+    # a bare hole field gives each wire no guidance from the central bore
+    # out to its hole -- wires can cross/tangle during threading.
+    #
+    # Replaced with a small number of discrete RADIAL GUIDE GROOVES: each
+    # is a shallow channel running from just outside the central bore out
+    # to a clocked through-hole, so a wire end is captured at the bore and
+    # guided cleanly to its own exit point. Fewer, larger, well-separated
+    # features -- clearly resolved in render and easier to inspect/machine.
     # ----------------------------------------------------------------
     p1 = cq.Workplane("XY").circle(fixture_r).extrude(h_plate)
     p1 = p1.faces(">Z").workplane().circle(bore_r).cutThruAll()
 
-    wire_holes_pts = []
-    hole_dia = 1.0
-    r_start = bore_r + 2.5
-    r_end = disc_r - 1.0
-    if r_end > r_start:
-        for r_ring in np.arange(r_start, r_end, 2.5):
-            circumference = 2 * np.pi * r_ring
-            n_holes = int(circumference / (hole_dia * 2.2))
-            if n_holes > 0:
-                for i in range(n_holes):
-                    ang = np.radians(i * (360.0 / n_holes))
-                    wire_holes_pts.append((r_ring * np.cos(ang), r_ring * np.sin(ang)))
+    GUIDE_WIDTH = 1.0
+    GUIDE_DEPTH = 0.6
+    GUIDE_HOLE_DIA = 1.2
+    GUIDE_MIN_RIDGE = 0.8
 
-    if wire_holes_pts:
-        wire_holes_tool = (cq.Workplane("XY")
-                            .pushPoints(wire_holes_pts)
-                            .circle(hole_dia / 2.0)
-                            .extrude(h_plate + 10)
-                            .translate((0, 0, -5)))
-        p1 = p1.cut(wire_holes_tool)
+    # Both radii derived as bounded fractions of the guaranteed-positive
+    # span (never fixed mm offsets independent of it), so guide_r_end is
+    # mathematically guaranteed > guide_r_start for every input
+    # validate_dims() accepts: the lower bound below is
+    # guide_r_start + 0.85*span in the worst case, always positive.
+    guide_r_start = bore_r + min(0.3, 0.1 * span)
+    guide_r_end = min(guide_r_start + max(1.0, 0.5 * span), disc_r - 0.05 * span)
+
+    # Cap the count so grooves can't overlap at their tightest point (the
+    # inner radius, right where they exit the bore).
+    max_n_guide = int(np.floor((2 * np.pi * guide_r_start) / (GUIDE_WIDTH + GUIDE_MIN_RIDGE)))
+    n_guide = max(4, min(16, max_n_guide)) if max_n_guide >= 4 else max(1, max_n_guide)
+
+    if n_guide > 0 and guide_r_end > guide_r_start:
+        groove_len = guide_r_end - guide_r_start
+        groove_center_r = (guide_r_start + guide_r_end) / 2.0
+
+        channel_cutter = (cq.Workplane("XY")
+                           .box(groove_len, GUIDE_WIDTH, GUIDE_DEPTH * 2)
+                           .translate((groove_center_r, 0, h_plate)))
+        hole_cutter = (cq.Workplane("XY")
+                       .circle(GUIDE_HOLE_DIA / 2.0)
+                       .extrude(h_plate + 10)
+                       .translate((guide_r_end, 0, -5)))
+
+        for i in range(n_guide):
+            ang = i * (360.0 / n_guide)
+            p1 = p1.cut(channel_cutter.rotate((0, 0, 0), (0, 0, 1), ang))
+            p1 = p1.cut(hole_cutter.rotate((0, 0, 0), (0, 0, 1), ang))
 
     # ----------------------------------------------------------------
     # Fastener holes (bolt circle sits at disc_r+7, always inside
@@ -408,6 +456,7 @@ def generate_modular_pda_fixture(d_disc, d_waist, h_d, h_w, groove_count=None):
     meta = dict(
         disc_r=disc_r, bore_r=bore_r, boss_r=boss_r, transition_r=transition_r,
         fixture_r=fixture_r, shoulder_z=shoulder_z, n_grooves=n_grooves,
+        n_guide=n_guide, guide_r_start=guide_r_start, guide_r_end=guide_r_end,
         z_stop=z_stop, z_p5=z_p5, z_p4=z_p4, z_p2=z_p2, z_p1=z_p1, h_plate=h_plate,
     )
     return assy, z_p4 + (h_w / 2.0), meta
@@ -490,15 +539,39 @@ def _build_material_grid(meta, h_d, h_w, nr, nz):
 
 
 def solve_transient(meta, h_d, h_w, target_temp_c, soak_time_min,
-                     initial_temp_c=25.0, nr=55, nz=70, progress_cb=None):
+                     initial_temp_c=25.0, nr=55, nz=70, n_snapshots=14,
+                     progress_cb=None):
     """Explicit 2D axisymmetric transient conduction FD solve.
 
-    All truly furnace-exposed surfaces (outer curved radius, top, bottom,
-    and open internal cavities like the wire bore) are held at furnace
-    temperature -- a standard high-Biot-number simplification for a small
-    part in a well-circulated furnace. Solid nodes evolve using the local
-    material's thermal diffusivity. Stops early once every solid node is
-    within 0.05 C of target, and reports that equilibrium time.
+    Boundary conditions (documented here so they travel with the result --
+    also surfaced verbatim in the UI's "Analysis Conditions" panel):
+      * Dirichlet, T = target_temp_c, on every truly furnace-exposed
+        surface: the outer curved radius of the whole stack, the very top
+        face, the very bottom face, and any open internal cavity (the
+        central wire bore, the open waist cavity around the ceramic core,
+        the compression stop's through-hole). This is the standard
+        high-Biot-number idealization for a small part in a well
+        -circulated furnace -- surface temperature snaps to the furnace
+        air temperature much faster than the part's interior can respond.
+      * Symmetry (zero-flux) at the r=0 centerline, handled via the
+        analytic L'Hopital limit of the axisymmetric radial term.
+    Initial condition: uniform initial_temp_c (ambient) at t=0, representing
+    a room-temperature fixture loaded into a pre-heated furnace.
+    Loading: target_temp_c is the furnace set point (Dirichlet magnitude);
+    soak_time_min is the requested hold duration.
+    Material model: two isotropic regions (17-4PH SS bodies, alumina
+    ceramic core) via literature diffusivity; interface conduction uses
+    each node's own local diffusivity (first-order, no explicit flux
+    -continuity treatment at the interface).
+    Simplification: 2D axisymmetric -- small perforations (guide grooves,
+    positioning grooves, fastener holes) are not individually resolved,
+    since their thermal mass is negligible against the bulk.
+
+    Captures up to n_snapshots log-spaced fields through the transient (plus
+    the final state) so the UI can show the heating progression rather than
+    only the end state -- useful because small fixtures like this one often
+    reach equilibrium in seconds, long before the requested soak completes.
+    Stops early once every solid node is within 0.05 C of target.
     """
     r, z, mat = _build_material_grid(meta, h_d, h_w, nr, nz)
     dr, dz = r[1] - r[0], z[1] - z[0]
@@ -521,6 +594,10 @@ def solve_transient(meta, h_d, h_w, target_temp_c, soak_time_min,
     equilibrium_time_s = None
     steps_run = 0
 
+    snapshot_fracs = sorted(set(np.round(np.geomspace(0.003, 1.0, n_snapshots), 6)))
+    snapshots = [{"t_s": 0.0, "T": T.copy()}]
+    next_idx = 0
+
     for step in range(n_steps_requested):
         Tp = T.copy()
         lap_z = np.zeros_like(T)
@@ -539,31 +616,62 @@ def solve_transient(meta, h_d, h_w, target_temp_c, soak_time_min,
         if progress_cb and step % max(1, n_steps_requested // 20) == 0:
             progress_cb(step / n_steps_requested)
 
+        frac_now = steps_run / n_steps_requested
+        while next_idx < len(snapshot_fracs) and frac_now >= snapshot_fracs[next_idx]:
+            snapshots.append({"t_s": steps_run * dt, "T": T.copy()})
+            next_idx += 1
+
         if steps_run % 25 == 0 or steps_run == n_steps_requested:
             max_err = np.abs(T[is_solid] - target_temp_c).max() if is_solid.any() else 0.0
             if equilibrium_time_s is None and max_err <= CONVERGE_TOL_C:
                 equilibrium_time_s = steps_run * dt
+                if snapshots[-1]["t_s"] != equilibrium_time_s:
+                    snapshots.append({"t_s": equilibrium_time_s, "T": T.copy()})
                 break
+
+    if snapshots[-1]["t_s"] < steps_run * dt:
+        snapshots.append({"t_s": steps_run * dt, "T": T.copy()})
 
     if progress_cb:
         progress_cb(1.0)
 
     core_mask = (mat == 1)
+    boundary_conditions = {
+        "Dirichlet (furnace temp)": "Outer curved radius, top face, bottom face, "
+                                     "and all open internal cavities (wire bore, "
+                                     "open waist cavity, compression-stop bore)",
+        "Symmetry / zero-flux": "Centerline r = 0 (axisymmetric limit)",
+        "Initial condition": f"Uniform {initial_temp_c:.0f}C at t = 0 (ambient, furnace-loaded cold)",
+        "Loading": f"Furnace set point {target_temp_c:.0f}C held for {soak_time_min:.1f} min "
+                   f"({total_t:.0f} s) requested soak",
+        "Material model": (f"17-4PH SS: k={STEEL_PROPS['k']:.1f} W/m.K, rho={STEEL_PROPS['rho']:.0f} "
+                            f"kg/m3, cp={STEEL_PROPS['cp']:.0f} J/kg.K (alpha={ALPHA_STEEL:.2f} mm2/s); "
+                            f"Alumina 99.7%: k={CERAMIC_PROPS['k']:.1f} W/m.K, rho={CERAMIC_PROPS['rho']:.0f} "
+                            f"kg/m3, cp={CERAMIC_PROPS['cp']:.0f} J/kg.K (alpha={ALPHA_CERAMIC:.2f} mm2/s)"),
+        "Method": (f"Explicit 2D axisymmetric FD, {nr}x{nz} grid, dr={dr:.3f} mm, dz={dz:.3f} mm, "
+                   f"dt={dt:.4g} s ({steps_run} steps run), stability margin 0.4x the explicit limit"),
+        "Simplifications": "Small perforations (guide/positioning grooves, fastener holes) not "
+                            "individually resolved; interface conduction uses each node's local "
+                            "diffusivity (no explicit flux-continuity treatment at material boundaries)",
+    }
+
     return dict(
         r=r, z=z, T=T, mat=mat, dt=dt, n_steps=steps_run,
         core_min_temp=T[core_mask].min() if core_mask.any() else None,
         core_mean_temp=T[core_mask].mean() if core_mask.any() else None,
         target_temp=target_temp_c, equilibrium_time_s=equilibrium_time_s,
-        requested_soak_s=total_t,
+        requested_soak_s=total_t, snapshots=snapshots,
+        boundary_conditions=boundary_conditions,
     )
 
 
 with tab2:
     st.header("Modular Heat-Setting Fixture Studio (Drawing No. PDHIF-01-ASSY)")
     st.markdown(
-        "Parametric CAD generation with the **Nitinol Wire Guide Holes** on the Top Plate "
-        "and **Mesh Positioning Grooves** cut into the actual sloped cavity face that "
-        "contacts the flared disc mesh."
+        "Parametric CAD generation with discrete **Nitinol Wire Guide Channels** on the Top "
+        "Plate (radial slot + through-hole per wire, guiding each wire from the central bore "
+        "to a clocked exit point) and **Mesh Positioning Grooves** cut into the actual sloped "
+        "cavity face that contacts the flared disc mesh."
     )
 
     cad_c1, cad_c2 = st.columns(2)
@@ -572,20 +680,24 @@ with tab2:
         disc_dia = st.slider("Disc Outer Diameter (D_disc mm)", 12.0, 30.0, 26.0, step=1.0, key="t2_ddisc")
 
         max_waist = max_waist_dia_for_disc(disc_dia)
-        # Clamp any previously-stored slider value before instantiating the
-        # widget, so shrinking the disc diameter can never leave the waist
-        # slider holding a now-invalid value (Streamlit would otherwise
-        # raise on out-of-range session state).
-        if "t2_dwst" in st.session_state and st.session_state["t2_dwst"] > max_waist:
+        # Seed/clamp the stored slider value before instantiating the widget
+        # (and pass no `value=` once state exists) so shrinking the disc
+        # diameter can never leave the waist slider holding a now-invalid
+        # value, and so Streamlit doesn't warn about value/key conflicts.
+        if "t2_dwst" not in st.session_state:
+            st.session_state["t2_dwst"] = min(8.0, max_waist)
+        elif st.session_state["t2_dwst"] > max_waist:
             st.session_state["t2_dwst"] = max_waist
         waist_dia = st.slider(
-            "Waist Diameter (D_waist mm)", 4.0, max_waist, min(8.0, max_waist),
+            "Waist Diameter (D_waist mm)", 4.0, max_waist,
             step=0.5, key="t2_dwst",
         )
         st.caption(
             f"Capped at {max_waist:.1f} mm for this disc size (waist ≤ "
-            f"{MAX_WAIST_TO_DISC_RATIO:.2f}× disc diameter) to keep the funnel-insert "
-            f"profile geometrically valid and proportioned like a real occluder."
+            f"{MAX_WAIST_TO_DISC_RATIO:.2f}× disc diameter, and at least "
+            f"{MIN_ABS_SPAN_MM:.1f} mm of radial clearance reserved beyond the waist) so the "
+            f"insert shoulders, positioning grooves, and wire-guide channels all have room to "
+            f"fit without collapsing into each other."
         )
 
         h_disc = st.slider("Disc Cavity Height (H_disc mm)", 4.0, 10.0, 6.0, step=0.5, key="t2_hdisc")
@@ -607,15 +719,14 @@ with tab2:
             with st.spinner("Building parametric CAD assembly..."):
                 assy, z_mid, meta = generate_modular_pda_fixture(disc_dia, waist_dia, h_disc, h_waist)
                 compound = assy.toCompound()
-                vertices, triangles = compound.tessellate(0.4)
+                # Finer tessellation tolerance than the original (0.4 -> 0.12mm)
+                # so the guide grooves and positioning grooves resolve as
+                # clean, distinct facets instead of a coarse moire/"star"
+                # artifact where many small features fall below the old
+                # tolerance's effective resolution.
+                vertices, triangles = compound.tessellate(0.12)
                 if not vertices or not triangles:
                     raise ValueError("Generated geometry resulted in an empty mesh.")
-
-            info_c1, info_c2, info_c3, info_c4 = st.columns(4)
-            info_c1.metric("Fixture Body OD", f"{2*meta['fixture_r']:.1f} mm")
-            info_c2.metric("Core Seat Ø (boss)", f"{2*meta['boss_r']:.1f} mm")
-            info_c3.metric("Mesh Positioning Grooves", f"{meta['n_grooves']}")
-            info_c4.metric("Stack Height", f"{meta['z_p1'] + meta['h_plate']:.1f} mm")
 
             with st.spinner("Solving transient conduction field (17-4PH SS + alumina core)..."):
                 progress_bar = st.progress(0.0)
@@ -626,74 +737,137 @@ with tab2:
                 )
                 progress_bar.empty()
 
-            if thermal["equilibrium_time_s"] is not None:
-                st.success(
-                    f"Modular Fixture CAD compiled matching Drawing PDHIF-01-ASSY. "
-                    f"Thermal equilibrium reached in ≈{thermal['equilibrium_time_s']:.1f} s "
-                    f"of the {soak_time}-minute soak -- the remaining soak time is governed by "
-                    f"the nitinol phase-transformation hold requirement, not thermal lag."
-                )
-            else:
-                st.warning(
-                    f"Modular Fixture CAD compiled, but the {soak_time}-minute soak did NOT "
-                    f"reach thermal equilibrium (core min {thermal['core_min_temp']:.1f}°C vs "
-                    f"target {temp}°C). Increase soak time or verify furnace air circulation."
-                )
-
-            # Map the solved (r,z) field onto the tessellated 3D mesh vertices
-            x = np.array([v.x for v in vertices])
-            y = np.array([v.y for v in vertices])
-            zc = np.array([v.z for v in vertices])
-            i_idx = np.array([t[0] for t in triangles])
-            j_idx = np.array([t[1] for t in triangles])
-            k_idx = np.array([t[2] for t in triangles])
-
-            r_pts = np.sqrt(x**2 + y**2)
-            interp = RegularGridInterpolator(
-                (thermal["r"], thermal["z"]), thermal["T"],
-                bounds_error=False, fill_value=float(temp),
-            )
-            r_clamped = np.clip(r_pts, thermal["r"][0], thermal["r"][-1])
-            z_clamped = np.clip(zc, thermal["z"][0], thermal["z"][-1])
-            T_verts = interp(np.column_stack([r_clamped, z_clamped]))
-
-            fig2 = go.Figure(data=[
-                go.Mesh3d(
-                    x=x, y=y, z=zc, i=i_idx, j=j_idx, k=k_idx,
-                    intensity=T_verts, colorscale="Inferno",
-                    cmin=25.0, cmax=float(temp),
-                    colorbar=dict(title="Temperature (°C)", len=0.75),
-                    flatshading=True, showscale=True,
-                )
-            ])
-            fig2.update_layout(
-                title=(f"Modular Heat-Setting Fixture Assembly (PDHIF-01-ASSY | "
-                       f"Target: {temp}°C, {soak_time} min soak)"),
-                scene=dict(xaxis_title="X (mm)", yaxis_title="Y (mm)", zaxis_title="Z (mm)", aspectmode="data"),
-                margin=dict(l=0, r=0, b=0, t=40), height=700,
-            )
-            st.plotly_chart(fig2, width="stretch")
-
-            with st.expander("Thermal cross-section (r-z plane, mid-angle slice)"):
-                fig3, ax3 = plt.subplots(figsize=(6, 8))
-                cs = ax3.contourf(thermal["r"], thermal["z"], thermal["T"].T, levels=30, cmap="inferno")
-                ax3.contour(thermal["r"], thermal["z"], (thermal["mat"] == 1).T, levels=[0.5], colors="cyan", linewidths=1.5)
-                ax3.set_xlabel("Radius r (mm)")
-                ax3.set_ylabel("Height z (mm)")
-                ax3.set_title("Solved temperature field (cyan = ceramic core outline)")
-                plt.colorbar(cs, ax=ax3, label="°C")
-                st.pyplot(fig3)
-
             filename = "PDHIF_01_ASSY.step"
             cq.exporters.export(compound, filename)
-            with open(filename, "rb") as file:
-                st.download_button(
-                    label="💾 Download Modular Fixture STEP File (.STEP)",
-                    data=file, file_name=filename, mime="application/step",
-                    type="primary", width="stretch",
-                )
+            with open(filename, "rb") as f:
+                step_bytes = f.read()
+
+            # Default the time-in-soak view to whichever captured snapshot has
+            # the largest internal temperature spread -- i.e. the most visibly
+            # informative "cold spot" moment -- rather than always defaulting
+            # to the final (often fully equilibrated) state.
+            is_solid = thermal["mat"] >= 0
+            spreads = [
+                (snap["T"][is_solid].max() - snap["T"][is_solid].min()) if is_solid.any() else 0.0
+                for snap in thermal["snapshots"]
+            ]
+            default_idx = int(np.argmax(spreads)) if spreads else 0
+
+            st.session_state["t2_result"] = dict(
+                meta=meta, temp=float(temp), soak_time=float(soak_time),
+                x=np.array([v.x for v in vertices]),
+                y=np.array([v.y for v in vertices]),
+                z=np.array([v.z for v in vertices]),
+                i=np.array([t[0] for t in triangles]),
+                j=np.array([t[1] for t in triangles]),
+                k=np.array([t[2] for t in triangles]),
+                thermal=thermal, step_bytes=step_bytes,
+            )
+            st.session_state["t2_snapshot_idx"] = default_idx
 
         except ValueError as e:
             st.error(f"Design rejected: {e}")
         except Exception as e:
             st.error(f"Engine Exception: {str(e)}")
+
+    # ------------------------------------------------------------------
+    # Render section -- reads from session_state so scrubbing the
+    # time-in-soak slider below just re-colors the existing mesh with a
+    # different cached snapshot, instead of re-running CAD + FD on every
+    # slider move.
+    # ------------------------------------------------------------------
+    if "t2_result" in st.session_state:
+        res = st.session_state["t2_result"]
+        meta, thermal = res["meta"], res["thermal"]
+        temp, soak_time = res["temp"], res["soak_time"]
+
+        info_c1, info_c2, info_c3, info_c4 = st.columns(4)
+        info_c1.metric("Fixture Body OD", f"{2*meta['fixture_r']:.1f} mm")
+        info_c2.metric("Core Seat Ø (boss)", f"{2*meta['boss_r']:.1f} mm")
+        info_c3.metric("Mesh Positioning Grooves", f"{meta['n_grooves']}")
+        info_c4.metric("Wire Guide Channels", f"{meta['n_guide']}")
+
+        if thermal["equilibrium_time_s"] is not None:
+            st.success(
+                f"Modular Fixture CAD compiled matching Drawing PDHIF-01-ASSY. "
+                f"Thermal equilibrium reached in ≈{thermal['equilibrium_time_s']:.1f} s "
+                f"of the {soak_time:.0f}-minute soak -- the remaining soak time is governed by "
+                f"the nitinol phase-transformation hold requirement, not thermal lag."
+            )
+        else:
+            st.warning(
+                f"The {soak_time:.0f}-minute soak did NOT reach thermal equilibrium "
+                f"(core min {thermal['core_min_temp']:.1f}°C vs target {temp:.0f}°C). "
+                f"Increase soak time or verify furnace air circulation."
+            )
+
+        snapshots = thermal["snapshots"]
+        n_snap = len(snapshots)
+        if "t2_snapshot_idx" not in st.session_state or st.session_state["t2_snapshot_idx"] >= n_snap:
+            st.session_state["t2_snapshot_idx"] = n_snap - 1
+
+        st.subheader("Time-in-soak viewer")
+        snap_idx = st.slider(
+            "Elapsed furnace time", 0, n_snap - 1,
+            key="t2_snapshot_idx",
+            help="Scrub through the transient to see the heating front develop and settle. "
+                 "The default position is set to the moment with the largest internal "
+                 "temperature spread (most visible cold spot).",
+        )
+        t_sel = snapshots[snap_idx]["t_s"]
+        T_field = snapshots[snap_idx]["T"]
+        is_solid = thermal["mat"] >= 0
+        spread_now = (T_field[is_solid].max() - T_field[is_solid].min()) if is_solid.any() else 0.0
+        st.caption(
+            f"t = {t_sel:.1f} s into soak | solid-body range at this instant: "
+            f"{T_field[is_solid].min():.1f}°C to {T_field[is_solid].max():.1f}°C "
+            f"(spread {spread_now:.1f}°C)"
+        )
+
+        interp = RegularGridInterpolator(
+            (thermal["r"], thermal["z"]), T_field, bounds_error=False, fill_value=float(temp),
+        )
+        r_pts = np.sqrt(res["x"]**2 + res["y"]**2)
+        r_clamped = np.clip(r_pts, thermal["r"][0], thermal["r"][-1])
+        z_clamped = np.clip(res["z"], thermal["z"][0], thermal["z"][-1])
+        T_verts = interp(np.column_stack([r_clamped, z_clamped]))
+
+        fig2 = go.Figure(data=[
+            go.Mesh3d(
+                x=res["x"], y=res["y"], z=res["z"], i=res["i"], j=res["j"], k=res["k"],
+                intensity=T_verts, colorscale="Inferno",
+                cmin=25.0, cmax=float(temp),
+                colorbar=dict(title="Temperature (°C)", len=0.75),
+                flatshading=True, showscale=True,
+            )
+        ])
+        fig2.update_layout(
+            title=(f"Modular Heat-Setting Fixture Assembly (PDHIF-01-ASSY | "
+                   f"Target: {temp:.0f}°C | t = {t_sel:.1f} s)"),
+            scene=dict(xaxis_title="X (mm)", yaxis_title="Y (mm)", zaxis_title="Z (mm)", aspectmode="data"),
+            margin=dict(l=0, r=0, b=0, t=40), height=700,
+        )
+        st.plotly_chart(fig2, width="stretch")
+
+        with st.expander("Thermal cross-section (r-z plane, mid-angle slice)"):
+            fig3, ax3 = plt.subplots(figsize=(6, 8))
+            cs = ax3.contourf(thermal["r"], thermal["z"], T_field.T, levels=30, cmap="inferno",
+                               vmin=25.0, vmax=float(temp))
+            ax3.contour(thermal["r"], thermal["z"], (thermal["mat"] == 1).T, levels=[0.5], colors="cyan", linewidths=1.5)
+            ax3.set_xlabel("Radius r (mm)")
+            ax3.set_ylabel("Height z (mm)")
+            ax3.set_title(f"Solved temperature field at t={t_sel:.1f}s (cyan = ceramic core outline)")
+            plt.colorbar(cs, ax=ax3, label="°C")
+            st.pyplot(fig3)
+
+        with st.expander("Analysis conditions (boundary conditions, loading, material model)"):
+            for label, desc in thermal["boundary_conditions"].items():
+                st.markdown(f"**{label}:** {desc}")
+
+        st.download_button(
+            label="💾 Download Modular Fixture STEP File (.STEP)",
+            data=res["step_bytes"], file_name="PDHIF_01_ASSY.step", mime="application/step",
+            type="primary", width="stretch",
+        )
+    else:
+        st.info("Set your parameters above and click **Generate** to build the fixture and solve the thermal field.")
