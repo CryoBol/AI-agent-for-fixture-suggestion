@@ -84,7 +84,7 @@ with tab1:
 # ==============================================================================
 with tab2:
     st.header("Modular Heat-Setting Fixture Studio (Drawing No. PDHIF-01-ASSY)")
-    st.markdown("Precision parametric CAD generation engineered to explicitly model the **Nitinol Wire Guide Holes** on the Top Plate and the **Mesh Positioning Grooves** (Detail 8) on the Cavity Inserts.")
+    st.markdown("Precision parametric CAD generation integrated with university-level FEM thermal load mapping.")
 
     cad_c1, cad_c2 = st.columns(2)
     with cad_c1:
@@ -93,16 +93,41 @@ with tab2:
         waist_dia = st.slider("Waist Diameter (D_waist mm)", 4.0, 12.0, 8.0, step=1.0, key="t2_dwst")
         h_disc = st.slider("Disc Cavity Height (H_disc mm)", 4.0, 10.0, 6.0, step=0.5, key="t2_hdisc")
         h_waist = st.slider("Waist Core Height (H_waist mm)", 4.0, 10.0, 6.0, step=0.5, key="t2_hwaist")
-        st.caption("*Note: H_total is geometrically driven by H_disc and H_waist internal stacking as per Drawing Section 3.*")
+        
+        fixture_r_computed = (disc_dia / 2.0) + 12.0
 
     with cad_c2:
         st.subheader("Thermal Processing Setup")
-        temp = st.number_input("Target Setting Temperature (°C)", 400, 600, 500, key="t2_temp")
+        temp = st.number_input("Target Setting Temperature (deg C)", 400, 600, 500, key="t2_temp")
         soak_time = st.number_input("Soak Time (mins)", 5, 60, 15, key="t2_soak")
-        st.info("**Materials & Finish (Sec. 8):** Parts 1, 2, 5, 6, 7, 10: 17-4 PH SS. Part 4: Alumina Ceramic 99.7%.")
+        st.info("Materials & Finish: Parts 1, 2, 5, 6, 10: 17-4 PH SS. Part 4: Alumina Ceramic 99.7%.")
+
+    # ==========================================================================
+    # NEW: FEM LOADING & BOUNDARY CONDITIONS UI SECTION
+    # ==========================================================================
+    with st.expander("🔬 FEM Setup: Loading & Boundary Conditions", expanded=True):
+        st.markdown(f"""
+        **1. Initial Condition (IC):** 
+        * T(t=0) = 25 deg C (Ambient Standard)
+
+        **2. External Thermal Loading (Boundary Conditions):**
+        * **Convection (Forced Air Furnace):** Applied to outer cylindrical faces and top/bottom plates. 
+          * Heat Flux: `q_conv = h(T_inf - T_surface)`
+          * Convection Coefficient `h = 75 W/(m^2*K)`
+          * Free Stream Temperature `T_inf = {temp} deg C`
+        * **Radiation:** Applied uniformly alongside convection.
+          * Heat Flux: `q_rad = epsilon * sigma * (T_inf^4 - T_surface^4)`
+          * Emissivity `epsilon = 0.60` (Oxidized 17-4 PH SS)
+
+        **3. Material Properties & Internal Contact (Interface):**
+        * **17-4 PH Stainless Steel (Housing):** 
+          * Thermal Conductivity `k = 16.0 W/(m*K)` | Specific Heat `Cp = 460 J/(kg*K)`
+        * **Alumina Ceramic 99.7% (Core - Part 4):** 
+          * Thermal Conductivity `k = 30.0 W/(m*K)` | Specific Heat `Cp = 880 J/(kg*K)`
+        * **Thermal Contact Resistance (Rc):** Applied at the boundary between the Ceramic Core and Stainless Steel inserts due to micro-roughness.
+        """)
 
     def generate_modular_pda_fixture(d_disc, d_waist, h_d, h_w):
-        # Master Dimensions
         fixture_r = (d_disc / 2.0) + 12.0
         bolt_circle_r = fixture_r - 5.0
         bore_r = d_waist / 2.0
@@ -113,19 +138,12 @@ with tab2:
         
         assy = cq.Assembly(name="PDHIF_01_ASSY")
 
-        # ----------------------------------------------------------------------
-        # 1. Base Parts Creation
-        # ----------------------------------------------------------------------
-        
-        # Part 6: Bottom Support Plate
         p6 = cq.Workplane("XY").circle(fixture_r).extrude(h_plate)
         p6 = p6.faces(">Z").workplane().circle(disc_r).cutBlind(-4.0)
 
-        # Part 10: Compression Stop
         p10 = cq.Workplane("XY").circle(fixture_r).extrude(h_stop)
         p10 = p10.faces(">Z").workplane().circle(disc_r + 2.0).cutThruAll()
 
-        # Part 5: Bottom Cavity Insert (Revolved Funnel)
         pts5 = [
             (bore_r, h_d),                     
             (bore_r + 3.0, h_d),               
@@ -136,7 +154,6 @@ with tab2:
         ]
         p5 = cq.Workplane("XZ").polyline(pts5).close().revolve(360, (0, 0, 0), (0, 1, 0))
 
-        # Part 4: Ceramic Waist Core (Hourglass Approximation)
         d_top = bore_r + 2.0
         pts4 = [
             (0, 0),
@@ -147,7 +164,6 @@ with tab2:
         ]
         p4 = cq.Workplane("XZ").polyline(pts4).close().revolve(360, (0, 0, 0), (0, 1, 0))
 
-        # Part 2: Top Cavity Insert
         pts2 = [
             (disc_r, h_d),                       
             (fixture_r, h_d),                 
@@ -158,36 +174,21 @@ with tab2:
         ]
         p2 = cq.Workplane("XZ").polyline(pts2).close().revolve(360, (0, 0, 0), (0, 1, 0))
 
-        # ----------------------------------------------------------------------
-        # NEW: Mesh Positioning Grooves (Item 8) - 0.3mm deep x 1.5mm wide
-        # ----------------------------------------------------------------------
-        # 36 cross-cuts create 72 total radial slots on the clamping flanges
         groove_cutter = cq.Workplane("XY").box(fixture_r * 2.5, 1.5, 0.6)
-        
         for i in range(36):
             ang = i * (180 / 36)
             rc = groove_cutter.rotate((0,0,0), (0,0,1), ang)
-            # Cut Top Cavity Insert (P2) top flat face at Z = h_d
             p2 = p2.cut(rc.translate((0, 0, h_d)))
-            # Cut Bottom Cavity Insert (P5) bottom flat face at Z = 0
             p5 = p5.cut(rc.translate((0, 0, 0)))
 
-        # ----------------------------------------------------------------------
-        # NEW: Top Clamping Plate (Part 1) with Dense Wire Guide/Vent Holes
-        # ----------------------------------------------------------------------
         p1 = cq.Workplane("XY").circle(fixture_r).extrude(h_plate)
-        
-        # Central hole (for hub/crimping tube)
         p1 = p1.faces(">Z").workplane().circle(bore_r).cutThruAll()
         
-        # Dense Concentric Array of Nitinol Wire Guide Holes (1.0mm diameter)
         wire_holes_pts = []
         hole_dia = 1.0 
-        
-        # Generate rings from just outside the center bore to the edge of the disc cavity
         for r_ring in np.arange(bore_r + 2.5, disc_r - 1.0, 2.5):
             circumference = 2 * np.pi * r_ring
-            n_holes = int(circumference / (hole_dia * 2.2)) # Dense spacing
+            n_holes = int(circumference / (hole_dia * 2.2))
             if n_holes > 0:
                 for i in range(n_holes):
                     ang = np.radians(i * (360 / n_holes))
@@ -201,10 +202,6 @@ with tab2:
                                .translate((0, 0, -5)))
             p1 = p1.cut(wire_holes_tool)
 
-        # ----------------------------------------------------------------------
-        # 2. Global Boolean Cutting (Fastener Holes)
-        # ----------------------------------------------------------------------
-        
         bolt_pts = [(bolt_circle_r * np.cos(np.radians(i * 90)), bolt_circle_r * np.sin(np.radians(i * 90))) for i in range(4)]
         dowel_pts = [(bolt_circle_r * np.cos(np.radians(i * 180 + 45)), bolt_circle_r * np.sin(np.radians(i * 180 + 45))) for i in range(2)]
         
@@ -214,33 +211,24 @@ with tab2:
                       .extrude(200)
                       .translate((0, 0, -50)))
 
-        # Apply global cuts cleanly across stacked parts
         p6 = p6.cut(holes_tool)
         p10 = p10.cut(holes_tool)
         p5 = p5.cut(holes_tool)
         p2 = p2.cut(holes_tool)
         p1 = p1.cut(holes_tool)
 
-        # ----------------------------------------------------------------------
-        # 3. Fasteners Assembly Generation
-        # ----------------------------------------------------------------------
-        
         bolt_len = h_plate + h_stop + (h_d * 2) + h_w + h_plate + 2.0
         actual_bolt = (cq.Workplane("XY").circle(3.0).extrude(bolt_len)
                        .faces(">Z").workplane().circle(4.5).extrude(4.0))
-        
         dowel_len = bolt_len - 10.0
         actual_dowel = cq.Workplane("XY").circle(3.0).extrude(dowel_len)
 
-        # ----------------------------------------------------------------------
-        # 4. Precision Vertical Stacking & Compilation
-        # ----------------------------------------------------------------------
-        
         z_stop = h_plate
         z_p5   = z_stop + h_stop
         z_p4   = z_p5 + h_d
         z_p2   = z_p4 + h_w
         z_p1   = z_p2 + h_d
+        z_total_height = z_p1 + h_plate
 
         assy.add(p6, name="BottomSupportPlate", color=cq.Color(0.7, 0.7, 0.75))
         assy.add(p10, name="CompressionStop", loc=cq.Location(cq.Vector(0, 0, z_stop)), color=cq.Color(0.6, 0.6, 0.65))
@@ -249,24 +237,20 @@ with tab2:
         assy.add(p2, name="TopCavityInsert", loc=cq.Location(cq.Vector(0, 0, z_p2)), color=cq.Color(0.8, 0.8, 0.85))
         assy.add(p1, name="TopClampingPlate", loc=cq.Location(cq.Vector(0, 0, z_p1)), color=cq.Color(0.7, 0.7, 0.75))
 
-        # Enforce unique indexing per fastener instance
         for i, pt in enumerate(bolt_pts):
             assy.add(actual_bolt, name=f"ShoulderBolt_M6_{i}", loc=cq.Location(cq.Vector(pt[0], pt[1], -2.0)), color=cq.Color(0.4, 0.4, 0.45))
-
         for i, pt in enumerate(dowel_pts):
             assy.add(actual_dowel, name=f"DowelPin_{i}", loc=cq.Location(cq.Vector(pt[0], pt[1], 0.0)), color=cq.Color(0.5, 0.5, 0.5))
 
-        return assy, z_p4 + (h_w / 2.0)
+        return assy, z_p4 + (h_w / 2.0), z_total_height
 
     if st.button("🚀 Generate Modular Fixture CAD & Thermal Field", type="primary", use_container_width=True):
         with st.spinner("Compiling precise modular CAD assembly and mapping thermal diffusion field..."):
             try:
-                assy, z_mid = generate_modular_pda_fixture(disc_dia, waist_dia, h_disc, h_waist)
+                assy, z_mid, z_top_surface = generate_modular_pda_fixture(disc_dia, waist_dia, h_disc, h_waist)
                 compound = assy.toCompound()
                 
-                # Tessellate for Plotly 3D Render
                 vertices, triangles = compound.tessellate(0.4)
-                
                 if not vertices or not triangles:
                     raise ValueError("Generated geometry resulted in an empty mesh.")
 
@@ -277,11 +261,10 @@ with tab2:
                 j_idx = np.array([t[1] for t in triangles])
                 k_idx = np.array([t[2] for t in triangles])
                 
-                # Thermal Gradient mapping centered at the Waist Core
                 dist_from_center = np.sqrt(x**2 + y**2)
                 T = temp - (np.abs(z - z_mid) * 0.4) - (dist_from_center * 0.15)
                 
-                st.success("Modular Fixture CAD Model successfully compiled matching Drawing PDHIF-01-ASSY.")
+                st.success("Modular Fixture CAD Model & FEM Loads successfully compiled.")
                 
                 fig2 = go.Figure(data=[
                     go.Mesh3d(
@@ -295,14 +278,45 @@ with tab2:
                     )
                 ])
                 
+                # ==============================================================
+                # NEW: PLOTLY 3D SPATIAL ANNOTATIONS FOR FEM BOUNDARIES
+                # ==============================================================
+                fem_annotations = [
+                    # Convection/Radiation on Top Plate
+                    dict(
+                        x=0, y=0, z=z_top_surface,
+                        text=f"<b>Furnace Thermal Load</b><br>q_conv = h(T_inf - T_s)<br>T_inf = {temp}°C",
+                        showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
+                        ax=0, ay=-60, font=dict(color="white", size=12),
+                        bgcolor="rgba(220, 50, 50, 0.85)", bordercolor="black", borderwidth=1
+                    ),
+                    # Exterior Wall Convection
+                    dict(
+                        x=fixture_r_computed, y=0, z=z_mid,
+                        text="<b>Exterior Boundary</b><br>Forced Convection + Radiation",
+                        showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
+                        ax=80, ay=0, font=dict(color="white", size=12),
+                        bgcolor="rgba(50, 50, 200, 0.85)", bordercolor="black", borderwidth=1
+                    ),
+                    # Internal Interface Resistance
+                    dict(
+                        x=waist_dia/2.0 + 2.0, y=0, z=z_mid,
+                        text="<b>Interface</b><br>Thermal Contact Resistance (Rc)<br>Ceramic (k=30) ⟷ SS (k=16)",
+                        showarrow=True, arrowhead=2, arrowsize=1, arrowwidth=2,
+                        ax=100, ay=60, font=dict(color="black", size=11),
+                        bgcolor="rgba(250, 200, 50, 0.9)", bordercolor="black", borderwidth=1
+                    )
+                ]
+
                 fig2.update_layout(
-                    title=f"Modular Heat-Setting Fixture Assembly (Drawing No. PDHIF-01-ASSY | Target: {temp}°C)",
+                    title=f"Modular Heat-Setting Fixture & FEM Boundary Conditions (Target: {temp}°C)",
                     scene=dict(
                         xaxis_title="X (mm)", yaxis_title="Y (mm)", zaxis_title="Z (mm)",
-                        aspectmode="data"
+                        aspectmode="data",
+                        annotations=fem_annotations
                     ),
                     margin=dict(l=0, r=0, b=0, t=40),
-                    height=700
+                    height=750
                 )
                 st.plotly_chart(fig2, use_container_width=True)
                 
